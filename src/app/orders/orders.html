@@ -1,0 +1,40 @@
+<div class="orders-container">
+  <header class="header">
+    <h2>Orders</h2>
+  </header>
+
+  <div class="tabs">
+    <button *ngFor="let tab of tabs" 
+            class="tab-btn" 
+            [class.active]="tab === activeTab"
+            (click)="setTab(tab)">
+      {{tab}}
+    </button>
+  </div>
+
+  <div class="orders-list">
+    <div class="order-card" *ngFor="let order of orders">
+      <div class="order-header">
+        <div class="order-id">
+          <span class="label">Order ID</span>
+          <strong>{{order.id}}</strong>
+        </div>
+        <div class="order-status-row">
+          <span class="date">{{order.date}}</span>
+          <span class="status-badge" [ngClass]="order.status.toLowerCase().replace(' ', '-')">{{order.status}}</span>
+        </div>
+      </div>
+      
+      <div class="order-body">
+        <div class="order-image">{{order.image}}</div>
+        <div class="order-details">
+          <p>{{order.items}}</p>
+          <div class="price-row">
+            <span></span>
+            <strong>{{order.total}}</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,52 @@
+<div class="details-container" *ngIf="product">
+  <header class="header">
+    <button class="icon-btn" routerLink="/market"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <h2>Product Details</h2>
+    <div class="header-actions">
+      <button class="icon-btn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path></svg></button>
+    </div>
+  </header>
+
+  <div class="product-image-container">
+    <div class="main-image">{{product.image}}</div>
+    <div class="image-indicator">1/4</div>
+  </div>
+
+  <div class="product-info-section">
+    <div class="title-row">
+      <h3>{{product.name}}</h3>
+      <span class="tag">{{product.tag}}</span>
+    </div>
+    
+    <div class="rating-price-row">
+      <div class="rating">
+        <span class="star">★</span> {{product.rating}} <span class="reviews">({{product.reviews}} reviews)</span>
+      </div>
+      <div class="price">{{product.price}}</div>
+    </div>
+
+    <div class="description-section">
+      <h4>Description</h4>
+      <p>{{product.description}}</p>
+    </div>
+
+    <div class="seller-section">
+      <h4>Sold by</h4>
+      <div class="seller-card">
+        <div class="seller-avatar">{{product.seller.image}}</div>
+        <div class="seller-info">
+          <h5>{{product.seller.name}}</h5>
+          <span class="location"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg> {{product.seller.location}}</span>
+        </div>
+        <div class="seller-rating">
+          <span class="star">★</span> {{product.seller.rating}}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bottom-actions">
+    <button class="btn-outline" (click)="addToCart()">Add to Cart</button>
+    <button class="btn-primary" (click)="addToCart()">Buy Now</button>
+  </div>
+</div>
