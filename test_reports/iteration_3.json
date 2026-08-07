@@ -1,0 +1,44 @@
+{
+  "summary": "RETEST after iteration-2 blockers: all previously-missing endpoints are now implemented and verified end-to-end. Backend pytest 30/30 pass in serial mode (test_krishiva_backend.py). GET /api/subscriptions/plans returns razorpay_configured=false + monthly (₹99, 9900 paise, 31d) + yearly (₹999, 99900 paise, 365d). Full chunked media flow verified: POST /media/start -> 2x /chunk (95B + 95B base64-encoded) -> /finish -> GET /media/{id} returns 190 bytes; Range: bytes=0-99 returns 206 with 'Content-Range: bytes 0-99/190' and 100-byte body. Frontend E2E on 390x800 web preview: logged in as meera@krishiva.in / test1234 (login testID is `login-email`, not `login-identifier`) -> tapped FAB (+) -> /subscribe rendered ₹99 + ₹999 plan cards + 'Test mode' banner + 'Activate Yearly (Test Mode)' button (NO infinite loader) -> selected Monthly -> button text switched to 'Activate Monthly (Test Mode)' -> tapped -> 'Welcome to Krishiva Plus! 🌱' success screen -> 'Start exploring' returned to feed. Tapped FAB again -> /create-post opened (all 4 attach buttons Camera/Record/Photo/Video visible + testID `tag-waste` chip labeled '♻️ Waste Management') -> submitted text post 'TEST_MEERA verification post via Playwright' with category tag-waste -> Post button pressed -> returned to feed -> after reload the new post appears at top of feed with 'Waste Management' pill and the 'Join Plus' header pill is gone (Meera is now Plus). Profile tab shows testID `plus-active-card` ('Krishiva Plus active — Valid till 9/7/2026') beside Edit profile + Log out; no Join Plus CTA. On Suresh Yadav's /user/{id} page, testID `follow-user` toggled 'Follow' -> 'Following' and Followers count incremented 0 -> 1. Cleanup: reseeded via `cd /app/backend && python seed.py` at end so Meera is back to FREE. NOTE: pytest with default xdist -n auto has a race between the parallel worker that runs TestSubscriptionEndpoints.test_dev_activate_free_user (which flips Meera to Plus) and the worker running TestSubscriptionGating.test_free_user_*_403 — 3 tests fail when run in parallel because the fixture is session-scoped and both workers share Meera. Serial run passes 30/30. Recommend either (a) using --dist loadscope with class scoping in pytest.ini (already loadscope), or (b) making dev-activate test use a fresh throwaway user, or (c) restoring meera subscription in a teardown. Not a product bug.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "N/A (test infra)", "issue": "pytest-xdist parallel run: TestSubscriptionEndpoints.test_dev_activate_free_user activates Meera to Plus in a parallel worker, causing TestSubscriptionGating.test_free_user_{post,message,follow}_403 to see 200 instead of 403. Serial run (`-p no:xdist -o addopts=`) passes 30/30. Fix by scoping dev-activate to a throwaway user or by teardown that clears meera.subscription."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "shadow* style props (StyleSheet)", "issue": "Console warning: '\"shadow*\" style props are deprecated. Use \"boxShadow\".' Non-blocking on web, but should be migrated to unified boxShadow for RN 0.76+."},
+      {"component": "props.pointerEvents", "issue": "Console warning: 'props.pointerEvents is deprecated. Use style.pointerEvents' — pre-existing, not blocking."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_krishiva_backend.py",
+    "/app/test_reports/pytest/krishiva_results.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: fix pytest-xdist race so parallel runs stay green — simplest is to have test_dev_activate_free_user register + login a fresh TEST_* user instead of reusing seeded Meera. Serial run is already green.",
+    "OPTIONAL: migrate shadow* -> boxShadow to silence the RN web deprecation warning."
+  ],
+  "critical_code_review_comments": [
+    "subscribe.tsx has a small UX gap: when getPlans() fails, `err` is set but the JSX still shows only ActivityIndicator (cfg stays null). Add an `err && !cfg` branch to render the error + a Retry button. Not blocking now that the endpoint returns 200.",
+    "server.py is now well past 900 lines; still recommend splitting into routers/{auth,users,posts,messaging,ai,articles,subscriptions,payments,media}.py.",
+    "Media GET currently returns full bytes + honors Range: bytes=start-end 206 with correct Content-Range (verified in test). Good.",
+    "dev-activate endpoint accepts {plan_id} for logged-in user and returns 200 — matches api.devActivate() call."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_krishiva_backend.py (upgraded TestMediaUpload to a real end-to-end flow: start -> 2 chunks -> finish -> GET full bytes -> GET Range: bytes=0-99 with 206 + Content-Range assertions)"
+  ],
+  "success_rate": {
+    "backend": "100% (30/30 passed in serial mode; 27/30 in parallel due to Meera-shared-state race described above)",
+    "frontend": "100% — every requested flow (login-by-email, FAB -> subscribe, plan cards + Test Mode banner + Activate, Welcome screen, Start exploring -> create-post, text-post with Waste Management category, post appears in feed, profile 'Krishiva Plus active' card, follow toggle Follow -> Following + follower count +1) verified visually and via testID"
+  },
+  "seed_data_creation": "Reseeded via `cd /app/backend && python seed.py` at the end of the run so Meera returns to FREE (subscription: None). Fresh TEST_* users created via /auth/register during pytest remain in the db (harmless).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend external base URL: https://verified-harvest.preview.emergentagent.com. Reuse /app/backend/tests/test_krishiva_backend.py — 30/30 pass serial. Login testID is `login-email` (NOT `login-identifier`). Welcome screen has `welcome-login-btn` and `welcome-register-btn`. Post author profile follow testID is `follow-user`. Profile screen Plus card testID is `plus-active-card`. Feed post testIDs are `post-{uuid}`, `like-{uuid}`, `comment-{uuid}`, `share-{uuid}`. Post category chips are `tag-tips|tag-procedure|tag-waste|tag-cleanliness|tag-story|tag-question|tag-general`. Subscribe screen testIDs: `plan-monthly|plan-yearly|sub-pay|sub-done|sub-close|sub-error|sub-check-paid`. Meera is FREE after reseed. Razorpay keys still intentionally NOT configured — dev-activate is the expected TEST MODE path.",
+  "rca_of_issue": "Iteration-2 blockers (5 groups of 404 endpoints) are RESOLVED. Main agent re-added /api/subscriptions/plans, /api/subscriptions/me, /api/payments/dev-activate + /order + /verify, and /api/media/start + /{id}/chunk + /{id}/finish + GET /api/media/{id} (with Range support) to server.py. Verified end-to-end from the deployed frontend via Playwright: previously-blocked subscription upgrade path for FREE Meera now completes and unlocks posting, following and Plus-only UI in one flow."
+}

@@ -865,6 +865,266 @@ async def ai_chat_sync(body: AIChatIn, user: dict = Depends(get_current_user)):
     return {"reply": reply_text, "session_id": session_id}
 
 
+# ---------------------- Subscription & Payments (Razorpay) ----------------------
+PLANS = {
+    "monthly": {"amount": 9900, "days": 31, "label": "Krishiva Plus Monthly", "price_display": "₹99"},
+    "yearly": {"amount": 99900, "days": 365, "label": "Krishiva Plus Yearly", "price_display": "₹999"},
+}
+
+
+def rzp_client():
+    import razorpay
+    return razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
+
+
+async def activate_subscription(user_id: str, plan_id: str, payment_id: str, order_id: str = "") -> dict:
+    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(404, "User not found")
+    sub = user.get("subscription") or {}
+    if sub.get("payment_id") == payment_id:  # idempotent
+        return sub
+    now = datetime.now(timezone.utc)
+    start = now
+    cur = sub.get("expires_at", "")
+    if cur:
+        try:
+            cur_dt = datetime.fromisoformat(cur)
+            if cur_dt > now:
+                start = cur_dt  # extend an active subscription
+        except Exception:
+            pass
+    new_sub = {
+        "plan": plan_id,
+        "payment_id": payment_id,
+        "order_id": order_id,
+        "started_at": now.isoformat(),
+        "expires_at": (start + timedelta(days=PLANS[plan_id]["days"])).isoformat(),
+    }
+    await db.users.update_one({"id": user_id}, {"$set": {"subscription": new_sub}})
+    return new_sub
+
+
+@api.get("/subscriptions/plans")
+async def subscription_plans():
+    return {
+        "razorpay_configured": RAZORPAY_CONFIGURED,
+        "razorpay_key_id": RAZORPAY_KEY_ID if RAZORPAY_CONFIGURED else "",
+        "plans": [{"id": pid, **p} for pid, p in PLANS.items()],
+    }
+
+
+@api.get("/subscriptions/me")
+async def my_subscription(user: dict = Depends(get_current_user)):
+    sub = user.get("subscription") or {}
+    return {
+        "subscribed": subscription_active(user),
+        "plan": sub.get("plan", ""),
+        "expires_at": sub.get("expires_at", ""),
+    }
+
+
+@api.post("/payments/order")
+async def create_payment_order(body: PlanOrderIn, user: dict = Depends(get_current_user)):
+    """Web checkout: create a Razorpay Order."""
+    if not RAZORPAY_CONFIGURED:
+        raise HTTPException(503, "Payments not configured yet")
+    plan = PLANS[body.plan_id]
+    order = rzp_client().order.create({
+        "amount": plan["amount"], "currency": "INR",
+        "receipt": f"{user['id'][:12]}-{int(datetime.now().timestamp())}",
+        "notes": {"user_id": user["id"], "plan_id": body.plan_id},
+    })
+    await db.payments.insert_one({
+        "order_id": order["id"], "user_id": user["id"], "plan_id": body.plan_id,
+        "amount": plan["amount"], "status": "created", "created_at": now_iso(),
+    })
+    return {"key_id": RAZORPAY_KEY_ID, "order_id": order["id"], "amount": plan["amount"],
+            "currency": "INR", "name": plan["label"]}
+
+
+@api.post("/payments/payment-link")
+async def create_payment_link(body: PlanOrderIn, request: Request, user: dict = Depends(get_current_user)):
+    """Native (Expo Go) checkout: hosted Razorpay Payment Link."""
+    if not RAZORPAY_CONFIGURED:
+        raise HTTPException(503, "Payments not configured yet")
+    plan = PLANS[body.plan_id]
+    reference = f"{user['id'][:12]}-{int(datetime.now().timestamp())}"
+    base_url = str(request.base_url).rstrip("/")
+    link = rzp_client().payment_link.create({
+        "amount": plan["amount"], "currency": "INR", "accept_partial": False,
+        "reference_id": reference, "description": plan["label"],
+        "customer": {"email": user["email"], "contact": user.get("phone", "")},
+        "callback_url": f"{base_url}/api/payments/link-callback",
+        "callback_method": "get",
+    })
+    await db.payments.insert_one({
+        "payment_link_id": link["id"], "reference_id": reference, "user_id": user["id"],
+        "plan_id": body.plan_id, "amount": plan["amount"], "status": "created", "created_at": now_iso(),
+    })
+    return {"url": link["short_url"], "reference_id": reference}
+
+
+@api.post("/payments/verify")
+async def verify_payment(body: PaymentVerifyIn, user: dict = Depends(get_current_user)):
+    payment = await db.payments.find_one({"order_id": body.razorpay_order_id, "user_id": user["id"]}, {"_id": 0})
+    if not payment:
+        raise HTTPException(404, "Unknown order")
+    client_r = rzp_client()
+    try:
+        client_r.utility.verify_payment_signature({
+            "razorpay_order_id": body.razorpay_order_id,
+            "razorpay_payment_id": body.razorpay_payment_id,
+            "razorpay_signature": body.razorpay_signature,
+        })
+    except Exception:
+        raise HTTPException(400, "Invalid payment signature")
+    remote = client_r.payment.fetch(body.razorpay_payment_id)
+    if remote["order_id"] != body.razorpay_order_id or remote["status"] != "captured":
+        raise HTTPException(400, "Payment is not captured")
+    await db.payments.update_one(
+        {"order_id": body.razorpay_order_id},
+        {"$set": {"payment_id": body.razorpay_payment_id, "status": "captured"}},
+    )
+    sub = await activate_subscription(user["id"], payment["plan_id"], body.razorpay_payment_id, body.razorpay_order_id)
+    return {"ok": True, "subscription": sub}
+
+
+@api.get("/payments/link-callback")
+async def payment_link_callback(request: Request):
+    q = dict(request.query_params)
+    required = ["razorpay_payment_id", "razorpay_payment_link_id",
+                "razorpay_payment_link_reference_id", "razorpay_payment_link_status", "razorpay_signature"]
+    if any(k not in q for k in required):
+        raise HTTPException(400, "Incomplete callback")
+    client_r = rzp_client()
+    try:
+        client_r.utility.verify_payment_link_signature({
+            "payment_link_id": q["razorpay_payment_link_id"],
+            "payment_link_reference_id": q["razorpay_payment_link_reference_id"],
+            "payment_link_status": q["razorpay_payment_link_status"],
+            "razorpay_payment_id": q["razorpay_payment_id"],
+            "razorpay_signature": q["razorpay_signature"],
+        })
+    except Exception:
+        raise HTTPException(400, "Invalid link signature")
+    record = await db.payments.find_one({"payment_link_id": q["razorpay_payment_link_id"]}, {"_id": 0})
+    if not record or q["razorpay_payment_link_status"] != "paid":
+        raise HTTPException(400, "Payment not paid")
+    await db.payments.update_one(
+        {"payment_link_id": q["razorpay_payment_link_id"]},
+        {"$set": {"status": "captured", "payment_id": q["razorpay_payment_id"]}},
+    )
+    await activate_subscription(record["user_id"], record["plan_id"], q["razorpay_payment_id"])
+    return HTMLResponse(
+        "<html><body style='font-family:sans-serif;text-align:center;padding-top:80px;background:#F9F9F7'>"
+        "<h2 style='color:#2A7036'>✅ Payment successful!</h2>"
+        "<p>Your Krishiva Plus is active. Return to the app and tap “I've completed payment”.</p>"
+        "</body></html>"
+    )
+
+
+@api.post("/payments/dev-activate")
+async def dev_activate(body: PlanOrderIn, user: dict = Depends(get_current_user)):
+    """TEST-MODE activation used only while Razorpay keys are not configured.
+    Disabled automatically once real keys are added to backend/.env."""
+    if RAZORPAY_CONFIGURED:
+        raise HTTPException(400, "Razorpay is configured — use real checkout")
+    payment_id = f"dev-{uuid.uuid4()}"
+    await db.payments.insert_one({
+        "payment_id": payment_id, "user_id": user["id"], "plan_id": body.plan_id,
+        "amount": PLANS[body.plan_id]["amount"], "status": "dev_activated", "created_at": now_iso(),
+    })
+    sub = await activate_subscription(user["id"], body.plan_id, payment_id)
+    return {"ok": True, "dev_mode": True, "subscription": sub}
+
+
+# ---------------------- Media (chunked upload + range streaming) ----------------------
+MAX_MEDIA_BYTES = 60 * 1024 * 1024  # 60 MB
+
+
+@api.post("/media/start")
+async def media_start(body: MediaStartIn, user: dict = Depends(get_current_user)):
+    mid = str(uuid.uuid4())
+    (UPLOAD_DIR / f"{mid}.part").write_bytes(b"")
+    await db.media.insert_one({
+        "id": mid, "user_id": user["id"], "mime": body.mime,
+        "status": "uploading", "created_at": now_iso(),
+    })
+    return {"id": mid}
+
+
+@api.post("/media/{media_id}/chunk")
+async def media_chunk(media_id: str, body: MediaChunkIn, user: dict = Depends(get_current_user)):
+    import base64 as b64mod
+    m = await db.media.find_one({"id": media_id}, {"_id": 0})
+    if not m or m["user_id"] != user["id"] or m["status"] != "uploading":
+        raise HTTPException(404, "Upload not found")
+    part = UPLOAD_DIR / f"{media_id}.part"
+    if not part.exists():
+        raise HTTPException(404, "Upload not found")
+    try:
+        raw = b64mod.b64decode(body.data)
+    except Exception:
+        raise HTTPException(400, "Invalid chunk data")
+    if part.stat().st_size + len(raw) > MAX_MEDIA_BYTES:
+        part.unlink(missing_ok=True)
+        await db.media.update_one({"id": media_id}, {"$set": {"status": "failed"}})
+        raise HTTPException(413, "File too large (max 60MB). Record a shorter video.")
+    with open(part, "ab") as f:
+        f.write(raw)
+    return {"ok": True, "size": part.stat().st_size}
+
+
+@api.post("/media/{media_id}/finish")
+async def media_finish(media_id: str, user: dict = Depends(get_current_user)):
+    m = await db.media.find_one({"id": media_id}, {"_id": 0})
+    if not m or m["user_id"] != user["id"]:
+        raise HTTPException(404, "Upload not found")
+    part = UPLOAD_DIR / f"{media_id}.part"
+    if not part.exists():
+        raise HTTPException(404, "Upload not found")
+    final = UPLOAD_DIR / f"{media_id}.bin"
+    part.rename(final)
+    size = final.stat().st_size
+    await db.media.update_one({"id": media_id}, {"$set": {"status": "ready", "size": size}})
+    return {"id": media_id, "url": f"/api/media/{media_id}", "size": size}
+
+
+@api.get("/media/{media_id}")
+async def media_get(media_id: str, request: Request):
+    m = await db.media.find_one({"id": media_id, "status": "ready"}, {"_id": 0})
+    if not m:
+        raise HTTPException(404, "Media not found")
+    path = UPLOAD_DIR / f"{media_id}.bin"
+    if not path.exists():
+        raise HTTPException(404, "Media file missing")
+    size = path.stat().st_size
+    mime = m.get("mime", "video/mp4")
+    range_header = request.headers.get("range")
+    if range_header:
+        try:
+            unit, rng = range_header.split("=", 1)
+            start_s, _, end_s = rng.partition("-")
+            start = int(start_s)
+            end = int(end_s) if end_s else size - 1
+            end = min(end, size - 1)
+        except Exception:
+            raise HTTPException(416, "Invalid range")
+        with open(path, "rb") as f:
+            f.seek(start)
+            data = f.read(end - start + 1)
+        return Response(
+            content=data, status_code=206, media_type=mime,
+            headers={
+                "Content-Range": f"bytes {start}-{end}/{size}",
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(len(data)),
+            },
+        )
+    return Response(content=path.read_bytes(), media_type=mime, headers={"Accept-Ranges": "bytes"})
+
+
 # ---------------------- Health ----------------------
 @api.get("/")
 async def root():

@@ -259,27 +259,48 @@ class TestSubscriptionEndpoints:
         assert r.status_code == 200
 
 
-# ---------- Media chunked upload (MISSING) ----------
+# ---------- Media chunked upload ----------
 class TestMediaUpload:
-    def test_media_start_chunk_finish(self, session, ravi_auth):
+    def test_full_chunked_flow_and_range(self, session, ravi_auth):
+        # Start upload
         r = session.post(f"{API}/media/start",
                          headers=ravi_auth["headers"],
                          json={"mime": "video/mp4"})
         if r.status_code == 404:
             pytest.skip("MISSING: /api/media/start not implemented")
-        assert r.status_code == 200
+        assert r.status_code == 200, r.text
         mid = r.json()["id"]
-        payload = base64.b64encode(b"fake-mp4-bytes-hello" * 20).decode()
-        c = session.post(f"{API}/media/{mid}/chunk",
-                         headers=ravi_auth["headers"],
-                         json={"index": 0, "data": payload})
-        assert c.status_code == 200
-        f = session.post(f"{API}/media/{mid}/finish", headers=ravi_auth["headers"])
-        assert f.status_code == 200
 
-    def test_media_range_request(self, session, ravi_auth):
-        # depends on previous
-        pytest.skip("MISSING: /api/media endpoints not implemented")
+        # Send 2 chunks
+        chunk_a = b"HELLO-WORLD-CHUNK-A" * 5      # 95 bytes
+        chunk_b = b"CHUNK-B-VIDEO-BYTES" * 5      # 95 bytes
+        total_len = len(chunk_a) + len(chunk_b)
+
+        c0 = session.post(f"{API}/media/{mid}/chunk",
+                          headers=ravi_auth["headers"],
+                          json={"index": 0, "data": base64.b64encode(chunk_a).decode()})
+        assert c0.status_code == 200, c0.text
+        c1 = session.post(f"{API}/media/{mid}/chunk",
+                          headers=ravi_auth["headers"],
+                          json={"index": 1, "data": base64.b64encode(chunk_b).decode()})
+        assert c1.status_code == 200, c1.text
+
+        # Finish
+        fin = session.post(f"{API}/media/{mid}/finish", headers=ravi_auth["headers"])
+        assert fin.status_code == 200, fin.text
+
+        # GET full bytes
+        g = requests.get(f"{API}/media/{mid}")
+        assert g.status_code == 200, g.text
+        assert len(g.content) == total_len
+        assert g.content == chunk_a + chunk_b
+
+        # Range: bytes=0-99 -> 206 with Content-Range
+        rng = requests.get(f"{API}/media/{mid}", headers={"Range": "bytes=0-99"})
+        assert rng.status_code == 206, f"Expected 206 got {rng.status_code}: {rng.text}"
+        cr = rng.headers.get("Content-Range", "")
+        assert cr.startswith("bytes 0-99/"), f"Bad Content-Range: {cr}"
+        assert len(rng.content) == 100
 
 
 # ---------- AI multimodal ----------
