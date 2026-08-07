@@ -10,15 +10,27 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.emergent.verifiedharvest.ebye86"
+      "bundleIdentifier": "com.emergent.verifiedharvest.ebye86",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Show nearby farmers and localized farming tips",
+        "NSPhotoLibraryUsageDescription": "Pick photos and videos to share with the community",
+        "NSCameraUsageDescription": "Capture photos and videos of your farm to share"
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#000000"
+        "backgroundColor": "#2A7036"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.emergent.verifiedharvest.ebye86"
+      "package": "com.emergent.verifiedharvest.ebye86",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "READ_MEDIA_IMAGES",
+        "READ_MEDIA_VIDEO",
+        "CAMERA"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -35,7 +47,8 @@
           "resizeMode": "contain",
           "backgroundColor": "#000000"
         }
-      ]
+      ],
+      "expo-video"
     ],
     "experiments": {
       "typedRoutes": true

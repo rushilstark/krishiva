@@ -1,0 +1,41 @@
+{
+  "summary": "Krishiva backend end-to-end tested via external EXPO_PUBLIC_BACKEND_URL. 33/33 pytest assertions pass covering auth (register/login/me/patch/JWT 401), users (list/search/get/no _id leak), posts (6 seeded, tag & user_id filter, liked_by_me flag both auth & anon, create+posts_count increment, like toggle, 403 non-owner delete, 200 owner delete), comments (list + create + count increment), messaging (send/list conversations/history in order/self-block/unknown-user), articles (6 seeded, by id, 404), AI (POST /api/ai/chat_sync with Gemini 3 Flash returns real farming answer and persists both user + assistant messages in db.ai_messages verifiable via /api/ai/history), duplicate-email 400, invalid-token 401, and a dedicated no-ObjectId-leak scan across /auth/me, /users, /posts, /articles, /conversations.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_krishiva_backend.py",
+    "/app/test_reports/pytest/krishiva_results.xml"
+  ],
+  "action_items": [
+    "test_credentials.md is empty — please populate it with the seeded demo accounts (ravi@krishiva.in, ananya@krishiva.in, suresh@krishiva.in, meera@krishiva.in; password test1234) so future testing/fork agents pick them up automatically.",
+    "Consider adding pagination (skip/offset) on GET /api/posts and GET /api/users — currently only limit is supported. Not blocking.",
+    "Optional: expose the seeded article ids in a more RESTful way (currently hard-coded ids a1..a6 in server.py); acceptable for v1."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 777 lines — within limits but nearing the 700-line soft cap; consider splitting into routers/{auth,posts,messaging,ai,articles}.py in v2.",
+    "GET /api/posts parses the JWT inline instead of reusing get_current_user (necessary because auth is optional there); logic is correct and safe.",
+    "forgot-password returns the OTP in the response for dev convenience — clearly commented as dev-only. Must be removed before production.",
+    "All Mongo reads use projection {'_id': 0} — confirmed no ObjectId leaks in any tested endpoint.",
+    "Passwords hashed with bcrypt (per-hash salt via bcrypt.gensalt()), JWT HS256 with configurable expiry — solid."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_krishiva_backend.py (new pytest suite)"
+  ],
+  "success_rate": {
+    "backend": "100% (33/33)",
+    "frontend": "not tested (backend-only request)"
+  },
+  "seed_data_creation": "Did not re-run seed.py; verified the 4 seeded users, 6 posts, 6 comments and 6 articles are present and reachable through the public API. A handful of TEST_ users were created via POST /auth/register during testing — they use example.com email addresses and can be cleaned by re-running /app/backend/seed.py which currently only clears users whose email matches @krishiva.in.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend is fully green against external URL https://verified-harvest.preview.emergentagent.com. Reuse /app/backend/tests/test_krishiva_backend.py as the regression suite. Note: pydantic EmailStr rejects .test / .local TLDs — always use example.com/example.org in test payloads. The AI test hits real Gemini 3 Flash via emergentintegrations and takes ~3-5s; keep timeouts >=60s. Seeded post ids change every seed run, so tests fetch them dynamically.",
+  "rca_of_issue": "N/A — no bugs found."
+}
