@@ -1,14 +1,16 @@
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, TextInput, Alert } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, TextInput, Alert, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import * as ImagePicker from "expo-image-picker";
+import * as Location from "expo-location";
 import { colors, spacing, font, radius } from "@/src/theme";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
 import { initials } from "@/src/utils";
+import { ensureLocationPermission } from "@/src/permissions";
 import PostCard from "@/src/components/PostCard";
 
 export default function Profile() {
@@ -21,6 +23,23 @@ export default function Profile() {
   const [bio, setBio] = useState(user?.bio || "");
   const [location, setLocation] = useState(user?.location || "");
   const [saving, setSaving] = useState(false);
+  const [locLoading, setLocLoading] = useState(false);
+
+  const detectLocation = async () => {
+    setLocLoading(true);
+    try {
+      const granted = await ensureLocationPermission();
+      if (!granted) { setLocLoading(false); return; }
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const geo = await Location.reverseGeocodeAsync({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
+      const first = geo[0];
+      if (first) {
+        setLocation([first.city || first.subregion, first.region, first.country].filter(Boolean).join(", "));
+      }
+    } catch {} finally {
+      setLocLoading(false);
+    }
+  };
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -55,9 +74,11 @@ export default function Profile() {
   };
 
   const onLogout = () => {
+    const doLogout = async () => { await logout(); router.replace("/(auth)/welcome"); };
+    if (Platform.OS === "web") { doLogout(); return; }
     Alert.alert("Log out?", "You can log in again anytime.", [
       { text: "Cancel", style: "cancel" },
-      { text: "Log out", style: "destructive", onPress: async () => { await logout(); router.replace("/(auth)/welcome"); } },
+      { text: "Log out", style: "destructive", onPress: doLogout },
     ]);
   };
 
@@ -80,7 +101,12 @@ export default function Profile() {
             <View style={{ width: "100%", gap: spacing.sm, marginTop: spacing.md }}>
               <TextInput style={styles.field} value={name} onChangeText={setName} placeholder="Name" placeholderTextColor={colors.muted} testID="edit-name" />
               <TextInput style={[styles.field, { minHeight: 60 }]} value={bio} onChangeText={setBio} placeholder="Bio (a line about you & your farm)" placeholderTextColor={colors.muted} multiline testID="edit-bio" />
-              <TextInput style={styles.field} value={location} onChangeText={setLocation} placeholder="Village, City, State" placeholderTextColor={colors.muted} testID="edit-location" />
+              <View style={styles.locRow}>
+                <TextInput style={[styles.field, { flex: 1 }]} value={location} onChangeText={setLocation} placeholder="Village, City, State" placeholderTextColor={colors.muted} testID="edit-location" />
+                <Pressable testID="detect-location" style={styles.locBtn} onPress={detectLocation} disabled={locLoading}>
+                  {locLoading ? <ActivityIndicator size="small" color={colors.brand} /> : <Ionicons name="navigate" size={18} color={colors.brand} />}
+                </Pressable>
+              </View>
               <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: spacing.sm }}>
                 <Pressable style={styles.ghostBtn} onPress={() => setEditing(false)}><Text style={styles.ghostBtnText}>Cancel</Text></Pressable>
                 <Pressable style={styles.primaryBtn} onPress={saveEdit} disabled={saving} testID="save-profile">
@@ -102,20 +128,37 @@ export default function Profile() {
                 <View style={styles.statCell}><Text style={styles.statN}>{posts.length}</Text><Text style={styles.statL}>Posts</Text></View>
                 <View style={styles.statDivider} />
                 <View style={styles.statCell}><Text style={styles.statN}>{user.followers}</Text><Text style={styles.statL}>Followers</Text></View>
-                <View style={styles.statDivider} />
-                <View style={styles.statCell}>
-                  <Text style={[styles.statN, { textTransform: "capitalize" }]}>{user.verification_level === "none" ? "Basic" : user.verification_level.replace("_", " ")}</Text>
-                  <Text style={styles.statL}>Level</Text>
-                </View>
               </View>
+
+              {user.subscribed ? (
+                <View style={styles.plusCard} testID="plus-active-card">
+                  <Ionicons name="sparkles" size={18} color={colors.warning} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.plusTitle}>Krishiva Plus active</Text>
+                    <Text style={styles.plusSub}>
+                      {user.subscription_expires_at ? `Valid till ${new Date(user.subscription_expires_at).toLocaleDateString()}` : "Full member access"}
+                    </Text>
+                  </View>
+                </View>
+              ) : (
+                <Pressable style={styles.plusCta} onPress={() => router.push("/subscribe")} testID="profile-subscribe">
+                  <Ionicons name="sparkles" size={18} color="#fff" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.plusCtaTitle}>Join Krishiva Plus</Text>
+                    <Text style={styles.plusCtaSub}>Unlock posting, follow & chat · from ₹99/mo</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color="#fff" />
+                </Pressable>
+              )}
 
               <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: spacing.md, width: "100%" }}>
                 <Pressable testID="edit-profile" style={styles.primaryBtn} onPress={() => setEditing(true)}>
                   <Ionicons name="pencil" size={14} color="#fff" />
                   <Text style={styles.primaryBtnText}>Edit profile</Text>
                 </Pressable>
-                <Pressable testID="logout-btn" style={styles.iconBtn} onPress={onLogout}>
-                  <Ionicons name="log-out-outline" size={20} color={colors.onSurface} />
+                <Pressable testID="logout-btn" style={styles.logoutBtn} onPress={onLogout}>
+                  <Ionicons name="log-out-outline" size={18} color={colors.error} />
+                  <Text style={styles.logoutTxt}>Log out</Text>
                 </Pressable>
               </View>
             </>
@@ -165,7 +208,17 @@ const styles = StyleSheet.create({
   ghostBtn: { flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: radius.pill, height: 44, alignItems: "center", justifyContent: "center" },
   ghostBtnText: { color: colors.onSurface, fontWeight: "600" },
   iconBtn: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface },
+  logoutBtn: { flex: 1, flexDirection: "row", gap: 6, borderWidth: 1, borderColor: colors.border, borderRadius: radius.pill, height: 44, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface },
+  logoutTxt: { color: colors.error, fontWeight: "600" },
+  plusCard: { flexDirection: "row", alignItems: "center", gap: spacing.md, backgroundColor: colors.brandTertiary, borderRadius: radius.md, padding: spacing.md, width: "100%", marginTop: spacing.md, borderWidth: 1, borderColor: "#D8E8DA" },
+  plusTitle: { fontWeight: "700", color: colors.brand, fontSize: font.size.base },
+  plusSub: { fontSize: font.size.xs, color: colors.onSurfaceTertiary, marginTop: 2 },
+  plusCta: { flexDirection: "row", alignItems: "center", gap: spacing.md, backgroundColor: colors.brand, borderRadius: radius.md, padding: spacing.md, width: "100%", marginTop: spacing.md },
+  plusCtaTitle: { fontWeight: "700", color: "#fff", fontSize: font.size.base },
+  plusCtaSub: { fontSize: font.size.xs, color: "rgba(255,255,255,0.85)", marginTop: 2 },
   field: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.md, fontSize: font.size.base, color: colors.onSurface },
+  locRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  locBtn: { width: 46, height: 46, borderRadius: 23, backgroundColor: colors.brandTertiary, alignItems: "center", justifyContent: "center" },
   section: { paddingHorizontal: spacing.lg, paddingTop: spacing.xl, paddingBottom: spacing.sm },
   sectionTitle: { fontSize: font.size.lg, fontWeight: "700", color: colors.onSurface },
   emptyPosts: { alignItems: "center", padding: spacing.xl, gap: spacing.md },

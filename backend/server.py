@@ -1,5 +1,5 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header, status
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header, Request, status
+from fastapi.responses import StreamingResponse, Response, HTMLResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -22,6 +22,11 @@ JWT_SECRET = os.environ['JWT_SECRET']
 JWT_ALGO = os.environ['JWT_ALGO']
 JWT_EXPIRE_DAYS = int(os.environ['JWT_EXPIRE_DAYS'])
 EMERGENT_LLM_KEY = os.environ['EMERGENT_LLM_KEY']
+RAZORPAY_KEY_ID = os.environ.get('RAZORPAY_KEY_ID', '')
+RAZORPAY_KEY_SECRET = os.environ.get('RAZORPAY_KEY_SECRET', '')
+RAZORPAY_CONFIGURED = RAZORPAY_KEY_ID.startswith('rzp_') and bool(RAZORPAY_KEY_SECRET)
+UPLOAD_DIR = ROOT_DIR / 'uploads'
+UPLOAD_DIR.mkdir(exist_ok=True)
 
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
@@ -35,6 +40,7 @@ class UserPublic(BaseModel):
     id: str
     name: str
     email: EmailStr
+    phone: Optional[str] = ""
     role: Literal["farmer", "buyer", "expert"] = "farmer"
     bio: Optional[str] = ""
     avatar: Optional[str] = ""  # base64 or url
@@ -42,29 +48,35 @@ class UserPublic(BaseModel):
     verified: bool = False
     verification_level: Literal["none", "basic", "premium", "certified_organic"] = "none"
     followers: int = 0
+    following: int = 0
+    is_following: bool = False
     posts_count: int = 0
+    subscribed: bool = False
+    subscription_plan: Optional[str] = ""
+    subscription_expires_at: Optional[str] = ""
     created_at: str
 
 
 class RegisterIn(BaseModel):
     name: str
     email: EmailStr
+    phone: str = Field(min_length=10, max_length=15)
     password: str = Field(min_length=6)
     role: Literal["farmer", "buyer", "expert"] = "farmer"
     location: Optional[str] = ""
 
 
 class LoginIn(BaseModel):
-    email: EmailStr
+    identifier: str  # email or mobile number
     password: str
 
 
 class ForgotPasswordIn(BaseModel):
-    email: EmailStr
+    identifier: str  # email or mobile number
 
 
 class ResetPasswordIn(BaseModel):
-    email: EmailStr
+    identifier: str
     otp: str
     new_password: str = Field(min_length=6)
 
@@ -149,6 +161,27 @@ class ConversationOut(BaseModel):
 class AIChatIn(BaseModel):
     message: str
     session_id: Optional[str] = None
+    images: Optional[List[str]] = None  # base64 (with or without data URL prefix)
+    video_media_id: Optional[str] = None  # id from /media upload
+
+
+class MediaStartIn(BaseModel):
+    mime: str = "video/mp4"
+
+
+class MediaChunkIn(BaseModel):
+    index: int
+    data: str  # base64 chunk
+
+
+class PlanOrderIn(BaseModel):
+    plan_id: Literal["monthly", "yearly"]
+
+
+class PaymentVerifyIn(BaseModel):
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
 
 
 class ArticleOut(BaseModel):
@@ -188,21 +221,70 @@ def make_token(user_id: str) -> str:
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGO)
 
 
-def user_to_public(u: dict) -> UserPublic:
+def normalize_phone(phone: str) -> str:
+    digits = "".join(ch for ch in phone if ch.isdigit())
+    return digits[-10:] if len(digits) >= 10 else digits
+
+
+def subscription_active(u: dict) -> bool:
+    sub = u.get("subscription") or {}
+    expires = sub.get("expires_at", "")
+    if not expires:
+        return False
+    try:
+        return datetime.fromisoformat(expires) > datetime.now(timezone.utc)
+    except Exception:
+        return False
+
+
+def require_plus(u: dict):
+    if not subscription_active(u):
+        raise HTTPException(status_code=403, detail="subscription_required")
+
+
+async def find_user_by_identifier(identifier: str) -> Optional[dict]:
+    ident = identifier.strip()
+    if "@" in ident:
+        return await db.users.find_one({"email": ident.lower()}, {"_id": 0})
+    phone = normalize_phone(ident)
+    if not phone:
+        return None
+    return await db.users.find_one({"phone": phone}, {"_id": 0})
+
+
+def user_to_public(u: dict, viewer_id: Optional[str] = None) -> UserPublic:
+    sub = u.get("subscription") or {}
+    followers_ids = u.get("followers_ids")
     return UserPublic(
         id=u["id"],
         name=u["name"],
         email=u["email"],
+        phone=u.get("phone", ""),
         role=u.get("role", "farmer"),
         bio=u.get("bio", ""),
         avatar=u.get("avatar", ""),
         location=u.get("location", ""),
         verified=u.get("verified", False),
         verification_level=u.get("verification_level", "none"),
-        followers=u.get("followers", 0),
+        followers=len(followers_ids) if followers_ids is not None else u.get("followers", 0),
+        following=len(u.get("following_ids", [])),
+        is_following=bool(viewer_id and viewer_id in (followers_ids or [])),
         posts_count=u.get("posts_count", 0),
+        subscribed=subscription_active(u),
+        subscription_plan=sub.get("plan", ""),
+        subscription_expires_at=sub.get("expires_at", ""),
         created_at=u.get("created_at", now_iso()),
     )
+
+
+def viewer_from_auth(authorization: Optional[str]) -> Optional[str]:
+    if authorization and authorization.startswith("Bearer "):
+        try:
+            payload = jwt.decode(authorization.split(" ", 1)[1], JWT_SECRET, algorithms=[JWT_ALGO])
+            return payload["sub"]
+        except Exception:
+            return None
+    return None
 
 
 async def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
@@ -229,13 +311,20 @@ def conversation_id_for(a: str, b: str) -> str:
 @api.post("/auth/register", response_model=TokenOut)
 async def register(body: RegisterIn):
     email_lower = body.email.lower()
+    phone = normalize_phone(body.phone)
+    if len(phone) != 10:
+        raise HTTPException(status_code=400, detail="Please enter a valid 10-digit mobile number")
     existing = await db.users.find_one({"email": email_lower})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
+    existing_phone = await db.users.find_one({"phone": phone})
+    if existing_phone:
+        raise HTTPException(status_code=400, detail="Mobile number already registered")
     user = {
         "id": str(uuid.uuid4()),
         "name": body.name.strip(),
         "email": email_lower,
+        "phone": phone,
         "password_hash": hash_password(body.password),
         "role": body.role,
         "bio": "",
@@ -243,8 +332,10 @@ async def register(body: RegisterIn):
         "location": body.location or "",
         "verified": False,
         "verification_level": "none",
-        "followers": 0,
+        "followers_ids": [],
+        "following_ids": [],
         "posts_count": 0,
+        "subscription": None,
         "created_at": now_iso(),
     }
     await db.users.insert_one(user)
@@ -253,7 +344,7 @@ async def register(body: RegisterIn):
 
 @api.post("/auth/login", response_model=TokenOut)
 async def login(body: LoginIn):
-    user = await db.users.find_one({"email": body.email.lower()}, {"_id": 0})
+    user = await find_user_by_identifier(body.identifier)
     if not user or not verify_password(body.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     return TokenOut(access_token=make_token(user["id"]), user=user_to_public(user))
@@ -261,18 +352,17 @@ async def login(body: LoginIn):
 
 @api.post("/auth/forgot-password")
 async def forgot_password(body: ForgotPasswordIn):
-    """Generate a 6-digit OTP for password reset.
+    """Generate a 6-digit OTP for password reset. Accepts email OR mobile number.
     NOTE: In production this OTP would be sent via email/SMS. For this build
     we return it directly so the user can complete the flow without an
     email/SMS provider configured. Replace with real delivery when ready.
     """
     import random
-    email_lower = body.email.lower()
-    user = await db.users.find_one({"email": email_lower})
-    # Do not leak whether the email exists in the generic response, but for
+    user = await find_user_by_identifier(body.identifier)
+    # Do not leak whether the account exists in the generic response, but for
     # dev UX we still surface the OTP only when the account exists.
     if not user:
-        return {"ok": True, "message": "If this email is registered, an OTP has been generated.", "otp": None}
+        return {"ok": True, "message": "If this account is registered, an OTP has been generated.", "otp": None}
     otp = f"{random.randint(0, 999999):06d}"
     expires = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
     await db.users.update_one(
@@ -289,8 +379,7 @@ async def forgot_password(body: ForgotPasswordIn):
 
 @api.post("/auth/reset-password", response_model=TokenOut)
 async def reset_password(body: ResetPasswordIn):
-    email_lower = body.email.lower()
-    user = await db.users.find_one({"email": email_lower}, {"_id": 0})
+    user = await find_user_by_identifier(body.identifier)
     if not user or not user.get("reset_otp"):
         raise HTTPException(400, "No reset request found. Please request a new OTP.")
     if user["reset_otp"] != body.otp.strip():
@@ -331,11 +420,29 @@ async def update_me(body: UserUpdate, user: dict = Depends(get_current_user)):
 
 # ---------------------- Users ----------------------
 @api.get("/users/{user_id}", response_model=UserPublic)
-async def get_user(user_id: str):
+async def get_user(user_id: str, authorization: Optional[str] = Header(None)):
     u = await db.users.find_one({"id": user_id}, {"_id": 0})
     if not u:
         raise HTTPException(404, "User not found")
-    return user_to_public(u)
+    return user_to_public(u, viewer_from_auth(authorization))
+
+
+@api.post("/users/{user_id}/follow", response_model=UserPublic)
+async def toggle_follow(user_id: str, user: dict = Depends(get_current_user)):
+    if user_id == user["id"]:
+        raise HTTPException(400, "Cannot follow yourself")
+    target = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(404, "User not found")
+    require_plus(user)
+    if user["id"] in target.get("followers_ids", []):
+        await db.users.update_one({"id": user_id}, {"$pull": {"followers_ids": user["id"]}})
+        await db.users.update_one({"id": user["id"]}, {"$pull": {"following_ids": user_id}})
+    else:
+        await db.users.update_one({"id": user_id}, {"$addToSet": {"followers_ids": user["id"]}})
+        await db.users.update_one({"id": user["id"]}, {"$addToSet": {"following_ids": user_id}})
+    target = await db.users.find_one({"id": user_id}, {"_id": 0})
+    return user_to_public(target, user["id"])
 
 
 @api.get("/users", response_model=List[UserPublic])
@@ -373,6 +480,7 @@ async def hydrate_post(p: dict, viewer_id: Optional[str]) -> PostOut:
 
 @api.post("/posts", response_model=PostOut)
 async def create_post(body: PostCreate, user: dict = Depends(get_current_user)):
+    require_plus(user)
     post = {
         "id": str(uuid.uuid4()),
         "user_id": user["id"],
@@ -518,6 +626,7 @@ async def list_messages(other_user_id: str, user: dict = Depends(get_current_use
 
 @api.post("/messages", response_model=MessageOut)
 async def send_message(body: MessageCreate, user: dict = Depends(get_current_user)):
+    require_plus(user)
     if body.to_user_id == user["id"]:
         raise HTTPException(400, "Cannot message yourself")
     other = await db.users.find_one({"id": body.to_user_id})
@@ -706,16 +815,29 @@ async def ai_history(session_id: Optional[str] = None, user: dict = Depends(get_
 
 @api.post("/ai/chat_sync")
 async def ai_chat_sync(body: AIChatIn, user: dict = Depends(get_current_user)):
-    """Non-streaming fallback for simpler mobile handling."""
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    """Non-streaming chat. Supports multimodal: base64 images and uploaded videos (Gemini)."""
+    from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent, FileContentWithMimeType
 
     session_id = body.session_id or f"{user['id']}-{uuid.uuid4()}"
+
+    file_contents = []
+    for img in (body.images or [])[:4]:
+        b64 = img.split(",", 1)[1] if img.startswith("data:") else img
+        file_contents.append(ImageContent(image_base64=b64))
+    if body.video_media_id:
+        m = await db.media.find_one({"id": body.video_media_id, "status": "ready"}, {"_id": 0})
+        vpath = UPLOAD_DIR / f"{body.video_media_id}.bin"
+        if m and vpath.exists():
+            file_contents.append(FileContentWithMimeType(file_path=str(vpath), mime_type=m.get("mime", "video/mp4")))
+
     await db.ai_messages.insert_one({
         "id": str(uuid.uuid4()),
         "session_id": session_id,
         "user_id": user["id"],
         "role": "user",
         "text": body.message,
+        "has_image": bool(body.images),
+        "has_video": bool(body.video_media_id),
         "created_at": now_iso(),
     })
 
@@ -726,7 +848,7 @@ async def ai_chat_sync(body: AIChatIn, user: dict = Depends(get_current_user)):
     ).with_model("gemini", "gemini-3-flash-preview")
 
     try:
-        reply = await chat.send_message(UserMessage(text=body.message))
+        reply = await chat.send_message(UserMessage(text=body.message, file_contents=file_contents or None))
         reply_text = reply if isinstance(reply, str) else str(reply)
     except Exception as e:
         logger.exception("AI sync error")
@@ -766,6 +888,7 @@ logger = logging.getLogger("krishiva")
 @app.on_event("startup")
 async def startup():
     await db.users.create_index("email", unique=True)
+    await db.users.create_index("phone")
     await db.posts.create_index([("created_at", -1)])
     await db.messages.create_index("conversation_id")
     await db.conversations.create_index("participants")

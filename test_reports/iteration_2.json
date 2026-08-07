@@ -1,0 +1,58 @@
+{
+  "summary": "Backend: 26/26 IMPLEMENTED tests pass — new auth contract (register-with-phone, login/forgot/reset by identifier email OR phone), Krishiva Plus gating (403 for free meera on POST /posts, /messages, /users/{id}/follow — all detail='subscription_required'; 200 for plus ravi), follow toggle, AI multimodal (text + 1x1 base64 jpeg attachment both return real Gemini 3 Flash replies), and full regression (posts/comments/conversations/articles/no-_id-leak). CRITICAL BLOCKER: 5 endpoints referenced by the frontend and mentioned in the spec are 404 on the backend — GET /api/subscriptions/plans, GET /api/subscriptions/me, POST /api/payments/dev-activate, POST /api/payments/order, POST /api/media/start + /chunk + /finish + GET /api/media/{id}. Frontend: verified on 390x800 web preview — login by phone works, feed has NO category chip row, header shows 'Join Plus' pill for free Meera and no CTA for Plus Ravi, FAB opens /create-post which shows Camera + Record + Photo + Video attach buttons (user's reported 'no camera option' bug is FIXED) plus '♻️ Waste Management' category chip (correct label, not 'Waste Mgmt'), profile shows only Posts + Followers stats (NO Level, NO Following cell), labeled 'Log out' button beside 'Edit profile', 'Krishiva Plus active' card for Ravi, Sahayak '+' button opens attach tray with Camera/Photo/Video and text send returns real Gemini reply about jeevamrutha, register screen has Mobile number (10 digits) field, forgot-password accepts email or mobile. HOWEVER free user Meera tapping FAB goes to /subscribe which is stuck on an infinite loading spinner because /api/subscriptions/plans returns 404 — she cannot see the ₹99/₹999 plans, TEST MODE banner or Activate button, so the whole subscription upgrade path is BROKEN from the frontend perspective. YouTube posts show 'React Native WebView does not support this platform' on web preview (expected on web, not a bug).",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "GET /api/subscriptions/plans", "issue": "404 Not Found — endpoint not implemented. Frontend /subscribe screen is stuck on loading spinner because getPlans() fails. Blocks the entire free-user upgrade flow.", "priority": "CRITICAL"},
+      {"endpoint": "GET /api/subscriptions/me", "issue": "404 — not implemented. Frontend api.subscriptions.me() will fail.", "priority": "HIGH"},
+      {"endpoint": "POST /api/payments/dev-activate", "issue": "404 — not implemented. TEST MODE upgrade path unusable; free users can never become Plus, so posting/following/messaging is impossible for any user who did not start Plus via seed.", "priority": "CRITICAL"},
+      {"endpoint": "POST /api/payments/order + POST /api/payments/verify", "issue": "Not implemented. Even when Razorpay keys are set the Razorpay flow will 404. Only relevant once keys are configured but should exist.", "priority": "HIGH"},
+      {"endpoint": "POST /api/media/start, POST /api/media/{id}/chunk, POST /api/media/{id}/finish, GET /api/media/{id}", "issue": "All 404 — chunked media upload endpoints not implemented. Breaks: video posting in create-post (Record + Video buttons upload path), video attachment in Sahayak AI, and Range video streaming.", "priority": "CRITICAL"}
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "app/subscribe.tsx", "issue": "Screen renders header + benefits list but plans list stays on infinite loading spinner because backend /api/subscriptions/plans returns 404. No ₹99/₹999 cards, no TEST MODE banner, no Activate button reachable. Should either be fixed by adding backend endpoint OR gracefully render an error/CTA.", "testID": "N/A (loader visible)", "priority": "CRITICAL"}
+    ],
+    "integration_issues": [
+      {"flow": "Free user → subscribe → activate", "issue": "Cannot complete. /subscribe loads but plan cards never render (404 on /subscriptions/plans). Free users are permanently blocked from posting/following/messaging.", "affected_testIDs": ["fab-create", "plan-monthly", "plan-yearly", "activate-plan"]},
+      {"flow": "Create post with video (Record / Video attach)", "issue": "Frontend calls /api/media/start which 404s — any video attachment will surface a network error. Text + photo posts do work end-to-end.", "affected_testIDs": ["record-video", "pick-video"]},
+      {"flow": "Sahayak AI video attachment", "issue": "Same as above — attach-video button relies on missing /api/media endpoints so video-based AI Q&A will fail. Photo attachment (base64 direct) does work — verified backend-side with 1x1 jpeg.", "affected_testIDs": ["ai-attach-video"]}
+    ],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "YouTube WebView", "issue": "Feed video posts (video_url = YouTube URL) render the message 'React Native WebView does not support this platform.' on Expo web preview. Expected on web; will work on device. No action needed unless main agent wants a web fallback to <iframe>. Reference: /app/frontend/app/(tabs)/index.tsx post video rendering."},
+      {"component": "shadow* style props", "issue": "Console warning: '\"shadow*\" style props are deprecated. Use \"boxShadow\"'. Non-blocking. Reference: any StyleSheet using shadowColor/shadowOffset/shadowOpacity/shadowRadius."},
+      {"component": "props.pointerEvents", "issue": "Console warning: 'props.pointerEvents is deprecated. Use style.pointerEvents'. Non-blocking."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_krishiva_backend.py",
+    "/app/test_reports/pytest/krishiva_results.xml"
+  ],
+  "action_items": [
+    "MAIN AGENT: Implement missing backend endpoints in server.py — /api/subscriptions/plans (return {razorpay_configured: false, plans: [{id:'monthly', price_inr:99, ...}, {id:'yearly', price_inr:999, ...}]}), /api/subscriptions/me, /api/payments/dev-activate (POST with {plan_id} → sets user.subscription.expires_at), /api/payments/order + /api/payments/verify (Razorpay stubs — return 503 if keys not configured, per the agent-to-agent note), and /api/media/start + /chunk + /finish + GET with Range support. Frontend already calls these paths.",
+    "MAIN AGENT: After implementing, re-run /app/backend/tests/test_krishiva_backend.py — the 5 currently-skipped tests will convert to real assertions (they already gracefully skip on 404).",
+    "MAIN AGENT: Optionally add a graceful error banner on /subscribe when getPlans() fails so free users are not stuck on an infinite loader forever."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 899 lines — approaching the 700-line soft cap. Recommend splitting into routers/{auth,users,posts,messaging,ai,articles,subscriptions,media}.py.",
+    "forgot-password returns the OTP in the response for dev convenience (clearly commented). Must be removed before production.",
+    "All Mongo reads use projection {'_id': 0} — confirmed no ObjectId leaks across /auth/me, /users, /posts, /articles, /conversations.",
+    "Passwords bcrypt (per-hash salt) and JWT HS256 with configurable expiry — solid.",
+    "Follow toggle correctly gates on require_plus(user) — verified 403 for free user.",
+    "AI /chat_sync supports images (base64 ImageContent) and video (FileContentWithMimeType from uploads dir) — but the upload path itself is missing, so video is currently unreachable in practice."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_krishiva_backend.py (rewrote for new auth contract + new gating/media/subscription/multimodal-AI tests; kept skips on missing endpoints to avoid noise)"
+  ],
+  "success_rate": {
+    "backend": "100% (26/26 passed, 5 skipped due to missing endpoints)",
+    "frontend": "~85% — every UI element in the spec is present and correctly wired for Plus users; the subscription upgrade flow for FREE users is blocked by the missing backend endpoints"
+  },
+  "seed_data_creation": "Reseeded via `cd /app/backend && python seed.py` at the end of the run so Meera is back to FREE (subscription: None) for the main agent's follow-up frontend verification. Fresh TEST_* users created via /auth/register during pytest remain in the db (harmless; use example.com emails).",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend external base URL: https://verified-harvest.preview.emergentagent.com. Reuse /app/backend/tests/test_krishiva_backend.py — 26 pass, 5 skipped (subscriptions/payments/media). Login is {identifier, password} now, register requires 10-digit phone. Seed users: ravi/ananya/suresh (Plus yearly) and meera (Free). Password test1234. AI hits real Gemini 3 Flash — keep timeout ≥ 60s for text and ≥ 120s for image. pydantic EmailStr rejects .test/.local — use example.com. YouTube embed shows a WebView-not-supported message on web (expected).",
+  "rca_of_issue": "User-reported bug 'no camera option to be seen' when posting: RESOLVED. /app/frontend/app/create-post.tsx lines 162-177 render 4 attach buttons (testIDs take-photo, record-video, pick-image, pick-video) — verified visible on mobile web preview at 390x800. However the ROOT-CAUSE of the wider iteration-2 breakage is that the Krishiva Plus subscription and chunked media upload endpoints have never been added to /app/backend/server.py despite the frontend (see /app/frontend/src/api.ts lines 68-95) calling /subscriptions/plans, /subscriptions/me, /payments/dev-activate, /payments/order, /payments/verify, /media/start, /media/{id}/chunk, /media/{id}/finish. Reproduction: log in as meera (9876500004 / test1234), tap FAB → /subscribe loads but plan cards never appear (network tab: 404 /api/subscriptions/plans). Mitigation: main agent must add the ~40 lines of endpoints listed in action_items; frontend code already expects them."
+}

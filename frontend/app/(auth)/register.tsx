@@ -6,6 +6,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import * as Location from "expo-location";
 import { colors, spacing, font, radius } from "@/src/theme";
 import { useAuth } from "@/src/auth";
+import { ensureLocationPermission } from "@/src/permissions";
 
 const ROLES = [
   { id: "farmer", label: "Farmer", icon: "leaf", desc: "I grow or want to grow organic" },
@@ -18,6 +19,7 @@ export default function Register() {
   const { register } = useAuth();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [location, setLocation] = useState("");
   const [role, setRole] = useState<"farmer" | "buyer" | "expert">("farmer");
@@ -27,10 +29,11 @@ export default function Register() {
 
   const detectLocation = async () => {
     setLocLoading(true);
+    setErr(null);
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
-        setErr("Location permission denied. You can type it manually.");
+      const granted = await ensureLocationPermission();
+      if (!granted) {
+        setErr("Location permission not granted. You can type it manually.");
         setLocLoading(false);
         return;
       }
@@ -52,10 +55,12 @@ export default function Register() {
     setErr(null);
     if (!name.trim()) return setErr("Please enter your name");
     if (!email.trim()) return setErr("Please enter your email");
+    const digits = phone.replace(/\D/g, "");
+    if (digits.length < 10) return setErr("Please enter a valid 10-digit mobile number");
     if (password.length < 6) return setErr("Password must be at least 6 characters");
     setLoading(true);
     try {
-      await register({ name: name.trim(), email: email.trim(), password, role, location: location.trim() });
+      await register({ name: name.trim(), email: email.trim(), phone: digits, password, role, location: location.trim() });
       router.replace("/(tabs)");
     } catch (e: any) {
       setErr(e.message || "Registration failed");
@@ -106,6 +111,10 @@ export default function Register() {
             <View style={styles.field}>
               <Ionicons name="mail-outline" size={20} color={colors.muted} />
               <TextInput testID="reg-email" style={styles.input} placeholder="Email address" placeholderTextColor={colors.muted} autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} />
+            </View>
+            <View style={styles.field}>
+              <Ionicons name="call-outline" size={20} color={colors.muted} />
+              <TextInput testID="reg-phone" style={styles.input} placeholder="Mobile number (10 digits)" placeholderTextColor={colors.muted} keyboardType="phone-pad" maxLength={13} value={phone} onChangeText={setPhone} />
             </View>
             <View style={styles.field}>
               <Ionicons name="lock-closed-outline" size={20} color={colors.muted} />

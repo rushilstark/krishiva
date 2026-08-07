@@ -14,17 +14,21 @@ def iso(delta_min=0):
 
 
 DEMO_USERS = [
-    {"name": "Ravi Kumar", "email": "ravi@krishiva.in", "role": "farmer", "location": "Nashik, MH",
+    {"name": "Ravi Kumar", "email": "ravi@krishiva.in", "phone": "9876500001", "role": "farmer", "location": "Nashik, MH",
      "bio": "3rd-gen organic farmer growing tomatoes, brinjal & moong.", "verified": True, "verification_level": "certified_organic",
+     "plus": True,
      "avatar": "https://images.unsplash.com/photo-1722925407220-b22e1ced9ee9?w=300&q=80"},
-    {"name": "Ananya Patel", "email": "ananya@krishiva.in", "role": "expert", "location": "Anand, GJ",
+    {"name": "Ananya Patel", "email": "ananya@krishiva.in", "phone": "9876500002", "role": "expert", "location": "Anand, GJ",
      "bio": "Agronomist. Soil health & natural pest management.", "verified": True, "verification_level": "premium",
+     "plus": True,
      "avatar": "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=300&q=80"},
-    {"name": "Suresh Yadav", "email": "suresh@krishiva.in", "role": "farmer", "location": "Barabanki, UP",
+    {"name": "Suresh Yadav", "email": "suresh@krishiva.in", "phone": "9876500003", "role": "farmer", "location": "Barabanki, UP",
      "bio": "Practising zero-budget natural farming since 2018.", "verified": True, "verification_level": "basic",
+     "plus": True,
      "avatar": "https://images.unsplash.com/photo-1533105079780-92b9be482077?w=300&q=80"},
-    {"name": "Meera Nair", "email": "meera@krishiva.in", "role": "buyer", "location": "Bengaluru, KA",
+    {"name": "Meera Nair", "email": "meera@krishiva.in", "phone": "9876500004", "role": "buyer", "location": "Bengaluru, KA",
      "bio": "Home cook. Buys straight from farms.", "verified": False, "verification_level": "none",
+     "plus": False,
      "avatar": ""},
 ]
 
@@ -77,16 +81,32 @@ async def run():
     for u in DEMO_USERS:
         uid = str(uuid.uuid4())
         email_to_id[u["email"]] = uid
+        subscription = None
+        if u["plus"]:
+            subscription = {
+                "plan": "yearly", "payment_id": f"seed-{uid[:8]}", "order_id": "",
+                "started_at": iso(60 * 24), 
+                "expires_at": (datetime.now(timezone.utc) + timedelta(days=330)).isoformat(),
+            }
         doc = {
-            "id": uid, "name": u["name"], "email": u["email"],
+            "id": uid, "name": u["name"], "email": u["email"], "phone": u["phone"],
             "password_hash": hash_password("test1234"),
             "role": u["role"], "bio": u["bio"], "avatar": u["avatar"],
             "location": u["location"], "verified": u["verified"],
             "verification_level": u["verification_level"],
-            "followers": 42 if u["verified"] else 3,
+            "followers_ids": [], "following_ids": [],
+            "subscription": subscription,
             "posts_count": 0, "created_at": iso(60 * 24 * 30),
         }
         await db.users.insert_one(doc)
+
+    # Everyone follows Ravi; Ravi follows Ananya
+    ids = email_to_id
+    ravi, ananya, suresh, meera = ids["ravi@krishiva.in"], ids["ananya@krishiva.in"], ids["suresh@krishiva.in"], ids["meera@krishiva.in"]
+    await db.users.update_one({"id": ravi}, {"$set": {"followers_ids": [ananya, suresh, meera], "following_ids": [ananya]}})
+    await db.users.update_one({"id": ananya}, {"$set": {"followers_ids": [ravi, suresh], "following_ids": [ravi]}})
+    await db.users.update_one({"id": suresh}, {"$set": {"following_ids": [ravi, ananya]}})
+    await db.users.update_one({"id": meera}, {"$set": {"following_ids": [ravi]}})
     print(f"Seeded {len(DEMO_USERS)} users")
 
     post_ids = []

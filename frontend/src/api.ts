@@ -33,12 +33,13 @@ export const api = {
   base: BASE,
   register: (body: any) => req('/auth/register', { method: 'POST', body: JSON.stringify(body) }, false),
   login: (body: any) => req('/auth/login', { method: 'POST', body: JSON.stringify(body) }, false),
-  forgotPassword: (email: string) => req('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) }, false),
-  resetPassword: (email: string, otp: string, new_password: string) => req('/auth/reset-password', { method: 'POST', body: JSON.stringify({ email, otp, new_password }) }, false),
+  forgotPassword: (identifier: string) => req('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ identifier }) }, false),
+  resetPassword: (identifier: string, otp: string, new_password: string) => req('/auth/reset-password', { method: 'POST', body: JSON.stringify({ identifier, otp, new_password }) }, false),
   me: () => req('/auth/me'),
   updateMe: (body: any) => req('/auth/me', { method: 'PATCH', body: JSON.stringify(body) }),
   getUser: (id: string) => req(`/users/${id}`),
   searchUsers: (q: string) => req(`/users?q=${encodeURIComponent(q)}`),
+  toggleFollow: (id: string) => req(`/users/${id}/follow`, { method: 'POST' }),
 
   listPosts: (tag?: string, userId?: string) => {
     const params = new URLSearchParams();
@@ -60,8 +61,29 @@ export const api = {
   listArticles: () => req('/articles'),
   getArticle: (id: string) => req(`/articles/${id}`),
 
-  aiChat: async (message: string, session_id?: string) => {
-    return req('/ai/chat_sync', { method: 'POST', body: JSON.stringify({ message, session_id }) });
+  aiChat: async (message: string, session_id?: string, images?: string[], video_media_id?: string) => {
+    return req('/ai/chat_sync', { method: 'POST', body: JSON.stringify({ message, session_id, images, video_media_id }) });
   },
   aiHistory: (session_id?: string) => req(`/ai/history${session_id ? `?session_id=${session_id}` : ''}`),
+
+  // Subscription & payments
+  getPlans: () => req('/subscriptions/plans', {}, false),
+  mySubscription: () => req('/subscriptions/me'),
+  createOrder: (plan_id: string) => req('/payments/order', { method: 'POST', body: JSON.stringify({ plan_id }) }),
+  createPaymentLink: (plan_id: string) => req('/payments/payment-link', { method: 'POST', body: JSON.stringify({ plan_id }) }),
+  verifyPayment: (body: any) => req('/payments/verify', { method: 'POST', body: JSON.stringify(body) }),
+  devActivate: (plan_id: string) => req('/payments/dev-activate', { method: 'POST', body: JSON.stringify({ plan_id }) }),
+
+  // Chunked media upload (videos)
+  uploadMedia: async (base64: string, mime: string, onProgress?: (p: number) => void): Promise<{ id: string; url: string }> => {
+    const { id } = await req('/media/start', { method: 'POST', body: JSON.stringify({ mime }) });
+    const CHUNK = 512 * 1024; // base64 chars per chunk (multiple of 4)
+    let idx = 0;
+    for (let i = 0; i < base64.length; i += CHUNK, idx++) {
+      await req(`/media/${id}/chunk`, { method: 'POST', body: JSON.stringify({ index: idx, data: base64.slice(i, i + CHUNK) }) });
+      onProgress?.(Math.min(1, (i + CHUNK) / base64.length));
+    }
+    const fin = await req(`/media/${id}/finish`, { method: 'POST' });
+    return fin;
+  },
 };

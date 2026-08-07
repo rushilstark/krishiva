@@ -36,5 +36,5 @@ export function toYouTubeEmbed(url: string): string | null {
 }
 
 export function isDirectVideoUrl(url: string): boolean {
-  return /\.(mp4|mov|m4v|webm)($|\?)/i.test(url);
+  return /\.(mp4|mov|m4v|webm)($|\?)/i.test(url) || /\/api\/media\//.test(url);
 }

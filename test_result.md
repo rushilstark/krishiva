@@ -101,3 +101,11 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+## Iteration 2 (June 2026) — Main agent changes to test
+- Phone auth: register now REQUIRES 10-digit mobile; login/forgot-password accept email OR phone (field name: identifier)
+- Subscription "Krishiva Plus": gates POST /api/posts, POST /api/messages, POST /api/users/{id}/follow with 403 "subscription_required". Razorpay endpoints built but keys NOT configured -> TEST MODE via POST /api/payments/dev-activate. Plans: GET /api/subscriptions/plans, GET /api/subscriptions/me
+- Follow system: POST /api/users/{id}/follow toggle, is_following in GET /api/users/{id} (with auth)
+- Media: chunked upload POST /api/media/start, /chunk, /finish; GET /api/media/{id} with Range support
+- AI multimodal: POST /api/ai/chat_sync accepts images[] (base64) and video_media_id (Gemini)
+- Frontend: subscribe screen (modal), camera/record/gallery in create-post, ChatGPT-style attachments in Sahayak, feed category row REMOVED, profile shows only Posts+Followers (Level removed), labeled Log out, location detect in profile edit & register with permission contract
+- Credentials: /app/memory/test_credentials.md (meera@krishiva.in / 9876500004 is the FREE user for gating tests; others have Plus)

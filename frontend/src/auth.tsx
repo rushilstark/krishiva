@@ -2,16 +2,18 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 import { api, setToken, clearToken, getToken } from './api';
 
 export type User = {
-  id: string; name: string; email: string; role: string;
+  id: string; name: string; email: string; phone?: string; role: string;
   bio?: string; avatar?: string; location?: string;
   verified: boolean; verification_level: string;
-  followers: number; posts_count: number; created_at: string;
+  followers: number; following: number; is_following?: boolean;
+  posts_count: number; created_at: string;
+  subscribed: boolean; subscription_plan?: string; subscription_expires_at?: string;
 };
 
 type AuthCtx = {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (identifier: string, password: string) => Promise<void>;
   register: (body: any) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
@@ -41,8 +43,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => { bootstrap(); }, [bootstrap]);
 
-  const login = async (email: string, password: string) => {
-    const res = await api.login({ email, password });
+  const login = async (identifier: string, password: string) => {
+    const res = await api.login({ identifier, password });
     await setToken(res.access_token);
     setUser(res.user);
   };

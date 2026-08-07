@@ -14,7 +14,8 @@
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Show nearby farmers and localized farming tips",
         "NSPhotoLibraryUsageDescription": "Pick photos and videos to share with the community",
-        "NSCameraUsageDescription": "Capture photos and videos of your farm to share"
+        "NSCameraUsageDescription": "Capture photos and videos of your farm to share",
+        "NSMicrophoneUsageDescription": "Record farm videos with sound to share"
       }
     },
     "android": {
@@ -29,7 +30,8 @@
         "ACCESS_COARSE_LOCATION",
         "READ_MEDIA_IMAGES",
         "READ_MEDIA_VIDEO",
-        "CAMERA"
+        "CAMERA",
+        "RECORD_AUDIO"
       ]
     },
     "web": {

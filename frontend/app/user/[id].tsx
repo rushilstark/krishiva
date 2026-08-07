@@ -17,6 +17,7 @@ export default function UserProfile() {
   const [u, setU] = useState<any>(null);
   const [posts, setPosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [followBusy, setFollowBusy] = useState(false);
 
   useEffect(() => {
     Promise.all([api.getUser(id!), api.listPosts(undefined, id!)])
@@ -24,6 +25,24 @@ export default function UserProfile() {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [id]);
+
+  const onFollow = async () => {
+    if (!me?.subscribed) { router.push("/subscribe"); return; }
+    setFollowBusy(true);
+    try {
+      const updated = await api.toggleFollow(u.id);
+      setU(updated);
+    } catch (e: any) {
+      if (e.message === "subscription_required") router.push("/subscribe");
+    } finally {
+      setFollowBusy(false);
+    }
+  };
+
+  const onMessage = () => {
+    if (!me?.subscribed) { router.push("/subscribe"); return; }
+    router.push(`/chat/${u.id}`);
+  };
 
   if (loading) return <View style={styles.center}><ActivityIndicator color={colors.brand} /></View>;
   if (!u) return <View style={styles.center}><Text>User not found</Text></View>;
@@ -53,22 +72,22 @@ export default function UserProfile() {
             <View style={styles.statCell}><Text style={styles.statN}>{u.posts_count}</Text><Text style={styles.statL}>Posts</Text></View>
             <View style={styles.statDivider} />
             <View style={styles.statCell}><Text style={styles.statN}>{u.followers}</Text><Text style={styles.statL}>Followers</Text></View>
-            <View style={styles.statDivider} />
-            <View style={styles.statCell}>
-              <Text style={[styles.statN, { textTransform: "capitalize" }]}>{u.verification_level === "none" ? "Basic" : u.verification_level.replace("_", " ")}</Text>
-              <Text style={styles.statL}>Level</Text>
-            </View>
           </View>
 
           {!isMe ? (
             <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: spacing.md, width: "100%" }}>
-              <Pressable testID="msg-user" style={styles.primaryBtn} onPress={() => router.push(`/chat/${u.id}`)}>
+              <Pressable testID="msg-user" style={styles.primaryBtn} onPress={onMessage}>
                 <Ionicons name="chatbubble-outline" size={16} color="#fff" />
                 <Text style={styles.primaryBtnText}>Message</Text>
               </Pressable>
-              <Pressable style={styles.ghostBtn}>
-                <Ionicons name="person-add-outline" size={16} color={colors.onSurface} />
-                <Text style={styles.ghostBtnText}>Follow</Text>
+              <Pressable
+                testID="follow-user"
+                style={[styles.ghostBtn, u.is_following && styles.followingBtn, followBusy && { opacity: 0.6 }]}
+                onPress={onFollow}
+                disabled={followBusy}
+              >
+                <Ionicons name={u.is_following ? "checkmark" : "person-add-outline"} size={16} color={u.is_following ? colors.brand : colors.onSurface} />
+                <Text style={[styles.ghostBtnText, u.is_following && { color: colors.brand }]}>{u.is_following ? "Following" : "Follow"}</Text>
               </Pressable>
             </View>
           ) : null}
@@ -105,6 +124,7 @@ const styles = StyleSheet.create({
   primaryBtn: { flex: 1, backgroundColor: colors.brand, borderRadius: radius.pill, height: 44, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 6 },
   primaryBtnText: { color: "#fff", fontWeight: "600" },
   ghostBtn: { flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: radius.pill, height: 44, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 6 },
+  followingBtn: { borderColor: colors.brand, backgroundColor: colors.brandTertiary },
   ghostBtnText: { color: colors.onSurface, fontWeight: "600" },
   sectionTitle: { fontSize: font.size.lg, fontWeight: "700", color: colors.onSurface, paddingHorizontal: spacing.lg, marginTop: spacing.xl, marginBottom: spacing.sm },
   empty: { textAlign: "center", color: colors.muted, marginTop: spacing.xl, paddingHorizontal: spacing.lg },

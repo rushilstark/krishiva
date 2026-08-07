@@ -14,7 +14,7 @@ export default function ForgotPassword() {
   const { refresh } = useAuth();
 
   const [step, setStep] = useState<Step>("email");
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [otp, setOtp] = useState("");
   const [newPw, setNewPw] = useState("");
   const [showPw, setShowPw] = useState(false);
@@ -25,10 +25,10 @@ export default function ForgotPassword() {
 
   const requestOtp = async () => {
     setErr(null); setInfo(null); setDevOtp(null);
-    if (!email.trim()) return setErr("Please enter your email");
+    if (!identifier.trim()) return setErr("Please enter your email or mobile number");
     setLoading(true);
     try {
-      const res = await api.forgotPassword(email.trim());
+      const res = await api.forgotPassword(identifier.trim());
       if (res?.otp) {
         setDevOtp(res.otp);
         setInfo("OTP generated. In production this would be emailed/SMSed. Use the code shown below to reset.");
@@ -49,7 +49,7 @@ export default function ForgotPassword() {
     if (newPw.length < 6) return setErr("Password must be at least 6 characters");
     setLoading(true);
     try {
-      const res = await api.resetPassword(email.trim(), otp.trim(), newPw);
+      const res = await api.resetPassword(identifier.trim(), otp.trim(), newPw);
       await setToken(res.access_token);
       await refresh();
       router.replace("/(tabs)");
@@ -72,24 +72,23 @@ export default function ForgotPassword() {
             <Text style={styles.h1}>{step === "email" ? "Forgot password?" : "Reset password"}</Text>
             <Text style={styles.sub}>
               {step === "email"
-                ? "Enter the email you signed up with. We'll send a 6-digit code."
-                : `Enter the 6-digit code sent to ${email} and choose a new password.`}
+                ? "Enter your email or mobile number. We'll generate a 6-digit code."
+                : `Enter the 6-digit code for ${identifier} and choose a new password.`}
             </Text>
           </View>
 
           {step === "email" ? (
             <View style={{ marginTop: spacing.xxl, gap: spacing.md }}>
               <View style={styles.field}>
-                <Ionicons name="mail-outline" size={20} color={colors.muted} />
+                <Ionicons name="person-outline" size={20} color={colors.muted} />
                 <TextInput
                   testID="fp-email"
                   style={styles.input}
-                  placeholder="Email address"
+                  placeholder="Email or mobile number"
                   placeholderTextColor={colors.muted}
                   autoCapitalize="none"
-                  keyboardType="email-address"
-                  value={email}
-                  onChangeText={setEmail}
+                  value={identifier}
+                  onChangeText={setIdentifier}
                 />
               </View>
               {err ? <Text style={styles.err} testID="fp-error">{err}</Text> : null}

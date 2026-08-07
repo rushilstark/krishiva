@@ -42,12 +42,17 @@ export const shadow = {
 };
 
 export const TAGS = [
-  { id: 'all', label: 'All' },
-  { id: 'tips', label: 'Tips' },
-  { id: 'procedure', label: 'How-To' },
-  { id: 'waste', label: 'Waste Mgmt' },
-  { id: 'cleanliness', label: 'Cleanliness' },
-  { id: 'story', label: 'Stories' },
-  { id: 'question', label: 'Questions' },
-  { id: 'general', label: 'General' },
+  { id: 'all', label: 'All', emoji: '🌏' },
+  { id: 'tips', label: 'Organic Tips', emoji: '💡' },
+  { id: 'procedure', label: 'How-To Videos', emoji: '🎬' },
+  { id: 'waste', label: 'Waste Management', emoji: '♻️' },
+  { id: 'cleanliness', label: 'Cleanliness', emoji: '🧹' },
+  { id: 'story', label: 'Success Stories', emoji: '🌾' },
+  { id: 'question', label: 'Questions', emoji: '❓' },
+  { id: 'general', label: 'General', emoji: '🌱' },
 ];
+
+export function tagLabel(id: string): string {
+  const t = TAGS.find((t) => t.id === id);
+  return t ? t.label : id;
+}

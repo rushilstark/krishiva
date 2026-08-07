@@ -30,6 +30,7 @@ export default function RootLayout() {
             <Stack.Screen name="(auth)" />
             <Stack.Screen name="(tabs)" />
             <Stack.Screen name="create-post" options={{ presentation: "modal", animation: "slide_from_bottom" }} />
+            <Stack.Screen name="subscribe" options={{ presentation: "modal", animation: "slide_from_bottom" }} />
             <Stack.Screen name="post/[id]" options={{ presentation: "modal", animation: "slide_from_bottom" }} />
             <Stack.Screen name="chat/[id]" options={{ animation: "slide_from_right" }} />
             <Stack.Screen name="user/[id]" options={{ animation: "slide_from_right" }} />

@@ -3,7 +3,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import { colors, spacing, font, radius, TAGS } from "@/src/theme";
+import { colors, spacing, font, radius } from "@/src/theme";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
 import PostCard from "@/src/components/PostCard";
@@ -11,14 +11,13 @@ import PostCard from "@/src/components/PostCard";
 export default function Feed() {
   const router = useRouter();
   const { user } = useAuth();
-  const [tag, setTag] = useState("all");
   const [posts, setPosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const load = useCallback(async (t: string = tag) => {
+  const load = useCallback(async () => {
     try {
-      const data = await api.listPosts(t);
+      const data = await api.listPosts();
       setPosts(data);
     } catch (e) {
       // ignore
@@ -26,11 +25,16 @@ export default function Feed() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [tag]);
+  }, []);
 
-  useEffect(() => { load(tag); }, [tag, load]);
+  useEffect(() => { load(); }, [load]);
 
-  const onRefresh = () => { setRefreshing(true); load(tag); };
+  const onRefresh = () => { setRefreshing(true); load(); };
+
+  const goCreate = () => {
+    if (user?.subscribed) router.push("/create-post");
+    else router.push("/subscribe");
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
@@ -39,22 +43,17 @@ export default function Feed() {
           <Text style={styles.brand}>Krishiva</Text>
           <Text style={styles.hi}>Namaste, {user?.name?.split(" ")[0] || "friend"} 🌱</Text>
         </View>
-        <Pressable testID="header-notif" style={styles.iconBtn}>
-          <Ionicons name="notifications-outline" size={22} color={colors.onSurface} />
-        </Pressable>
-      </View>
-
-      <View style={styles.chipRow}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: spacing.lg, gap: spacing.sm, alignItems: "center" }}>
-          {TAGS.map((t) => {
-            const active = tag === t.id;
-            return (
-              <Pressable key={t.id} testID={`chip-${t.id}`} style={[styles.chip, active && styles.chipActive]} onPress={() => setTag(t.id)}>
-                <Text style={[styles.chipText, active && styles.chipTextActive]}>{t.label}</Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+          {!user?.subscribed ? (
+            <Pressable testID="header-plus" style={styles.plusPill} onPress={() => router.push("/subscribe")}>
+              <Ionicons name="sparkles" size={14} color="#fff" />
+              <Text style={styles.plusPillTxt}>Join Plus</Text>
+            </Pressable>
+          ) : null}
+          <Pressable testID="header-notif" style={styles.iconBtn}>
+            <Ionicons name="notifications-outline" size={22} color={colors.onSurface} />
+          </Pressable>
+        </View>
       </View>
 
       {loading ? (
@@ -64,7 +63,7 @@ export default function Feed() {
           <View style={styles.emptyIcon}><Ionicons name="leaf-outline" size={48} color={colors.brand} /></View>
           <Text style={styles.emptyTitle}>No posts yet</Text>
           <Text style={styles.emptyDesc}>Be the first to share a farming video, tip or story with the community.</Text>
-          <Pressable testID="empty-create" style={styles.emptyBtn} onPress={() => router.push("/create-post")}>
+          <Pressable testID="empty-create" style={styles.emptyBtn} onPress={goCreate}>
             <Ionicons name="add" size={20} color="#fff" />
             <Text style={styles.emptyBtnText}>Create your first post</Text>
           </Pressable>
@@ -82,7 +81,7 @@ export default function Feed() {
         />
       )}
 
-      <Pressable testID="fab-create" style={styles.fab} onPress={() => router.push("/create-post")}>
+      <Pressable testID="fab-create" style={styles.fab} onPress={goCreate}>
         <Ionicons name="add" size={28} color="#fff" />
       </Pressable>
     </SafeAreaView>
@@ -95,11 +94,8 @@ const styles = StyleSheet.create({
   brand: { fontSize: 24, fontWeight: "700", color: colors.brand },
   hi: { fontSize: font.size.base, color: colors.onSurfaceTertiary, marginTop: 2 },
   iconBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border },
-  chipRow: { height: 56, justifyContent: "center", borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.surface },
-  chip: { height: 36, paddingHorizontal: spacing.md, borderRadius: radius.pill, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center", flexShrink: 0 },
-  chipActive: { backgroundColor: colors.brand, borderColor: colors.brand },
-  chipText: { fontSize: font.size.base, color: colors.onSurfaceSecondary, fontWeight: "500" },
-  chipTextActive: { color: "#fff", fontWeight: "600" },
+  plusPill: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: colors.brand, paddingHorizontal: spacing.md, height: 34, borderRadius: radius.pill },
+  plusPillTxt: { color: "#fff", fontWeight: "700", fontSize: font.size.sm },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   empty: { flexGrow: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl, gap: spacing.md },
   emptyIcon: { width: 90, height: 90, borderRadius: 45, backgroundColor: colors.brandTertiary, alignItems: "center", justifyContent: "center" },

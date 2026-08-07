@@ -9,7 +9,7 @@ import { useAuth } from "@/src/auth";
 export default function Login() {
   const router = useRouter();
   const { login } = useAuth();
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -17,10 +17,10 @@ export default function Login() {
 
   const submit = async () => {
     setErr(null);
-    if (!email.trim() || !password) return setErr("Please enter email and password");
+    if (!identifier.trim() || !password) return setErr("Please enter your email/mobile and password");
     setLoading(true);
     try {
-      await login(email.trim(), password);
+      await login(identifier.trim(), password);
       router.replace("/(tabs)");
     } catch (e: any) {
       setErr(e.message || "Login failed");
@@ -44,16 +44,15 @@ export default function Login() {
 
           <View style={{ marginTop: spacing.xxl, gap: spacing.md }}>
             <View style={styles.field}>
-              <Ionicons name="mail-outline" size={20} color={colors.muted} />
+              <Ionicons name="person-outline" size={20} color={colors.muted} />
               <TextInput
                 testID="login-email"
                 style={styles.input}
-                placeholder="Email address"
+                placeholder="Email or mobile number"
                 placeholderTextColor={colors.muted}
                 autoCapitalize="none"
-                keyboardType="email-address"
-                value={email}
-                onChangeText={setEmail}
+                value={identifier}
+                onChangeText={setIdentifier}
               />
             </View>
             <View style={styles.field}>

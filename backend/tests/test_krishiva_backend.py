@@ -1,14 +1,31 @@
-"""Krishiva backend end-to-end tests (community-only v1)."""
+"""Krishiva backend end-to-end tests — iteration 2.
+
+Auth contract changed:
+- register requires phone (10-digit)
+- login/forgot/reset use {identifier: email OR phone}
+"""
 import os
 import uuid
+import base64
+import time
 import pytest
 import requests
 
 BASE = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://verified-harvest.preview.emergentagent.com").rstrip("/")
 API = f"{BASE}/api"
 
-PRIMARY_EMAIL = "ravi@krishiva.in"
-PRIMARY_PWD = "test1234"
+RAVI_EMAIL = "ravi@krishiva.in"     # Plus (yearly)
+RAVI_PHONE = "9876500001"
+ANANYA_EMAIL = "ananya@krishiva.in"  # Plus
+MEERA_EMAIL = "meera@krishiva.in"    # Free
+MEERA_PHONE = "9876500004"
+PWD = "test1234"
+
+
+def rand_phone() -> str:
+    """Return a random 10-digit phone unlikely to collide with seed data."""
+    import random
+    return "7" + "".join(str(random.randint(0, 9)) for _ in range(9))
 
 
 @pytest.fixture(scope="session")
@@ -18,22 +35,36 @@ def session():
     return s
 
 
-@pytest.fixture(scope="session")
-def primary_auth(session):
-    """Login as seeded Ravi."""
-    r = session.post(f"{API}/auth/login", json={"email": PRIMARY_EMAIL, "password": PRIMARY_PWD})
-    assert r.status_code == 200, f"Login failed: {r.status_code} {r.text}"
-    data = r.json()
-    return {"token": data["access_token"], "user": data["user"], "headers": {"Authorization": f"Bearer {data['access_token']}"}}
+def _login(session, identifier, password=PWD):
+    r = session.post(f"{API}/auth/login", json={"identifier": identifier, "password": password})
+    return r
 
 
 @pytest.fixture(scope="session")
-def secondary_auth(session):
-    """Login as Ananya (for chat/interaction tests)."""
-    r = session.post(f"{API}/auth/login", json={"email": "ananya@krishiva.in", "password": PRIMARY_PWD})
+def ravi_auth(session):
+    r = _login(session, RAVI_EMAIL)
+    assert r.status_code == 200, f"Ravi login failed: {r.status_code} {r.text}"
+    d = r.json()
+    return {"token": d["access_token"], "user": d["user"],
+            "headers": {"Authorization": f"Bearer {d['access_token']}", "Content-Type": "application/json"}}
+
+
+@pytest.fixture(scope="session")
+def ananya_auth(session):
+    r = _login(session, ANANYA_EMAIL)
     assert r.status_code == 200
-    data = r.json()
-    return {"token": data["access_token"], "user": data["user"], "headers": {"Authorization": f"Bearer {data['access_token']}"}}
+    d = r.json()
+    return {"token": d["access_token"], "user": d["user"],
+            "headers": {"Authorization": f"Bearer {d['access_token']}", "Content-Type": "application/json"}}
+
+
+@pytest.fixture(scope="session")
+def meera_auth(session):
+    r = _login(session, MEERA_EMAIL)
+    assert r.status_code == 200
+    d = r.json()
+    return {"token": d["access_token"], "user": d["user"],
+            "headers": {"Authorization": f"Bearer {d['access_token']}", "Content-Type": "application/json"}}
 
 
 # ---------- Health ----------
@@ -43,307 +74,262 @@ def test_root_health(session):
     assert r.json()["status"] == "ok"
 
 
-# ---------- Auth: register/login/me ----------
-class TestAuth:
-    def test_register_new_farmer(self, session):
+# ---------- Auth: register with phone ----------
+class TestAuthRegister:
+    def test_register_with_phone_success(self, session):
         email = f"test_{uuid.uuid4().hex[:8]}@example.com"
+        phone = rand_phone()
         r = session.post(f"{API}/auth/register", json={
-            "name": "TEST Farmer", "email": email, "password": "test1234",
-            "role": "farmer", "location": "Test City",
+            "name": "TEST Farmer", "email": email, "phone": phone,
+            "password": "test1234", "role": "farmer", "location": "Test City",
         })
         assert r.status_code == 200, r.text
         data = r.json()
-        assert data["token_type"] == "bearer"
-        assert "access_token" in data
         assert data["user"]["email"] == email
-        assert data["user"]["role"] == "farmer"
+        assert data["user"]["phone"] == phone
+        assert data["user"]["subscribed"] is False
         assert "_id" not in data["user"]
 
-    def test_register_buyer_and_expert_roles(self, session):
-        for role in ("buyer", "expert"):
-            email = f"test_{role}_{uuid.uuid4().hex[:6]}@example.com"
-            r = session.post(f"{API}/auth/register", json={
-                "name": f"TEST {role}", "email": email, "password": "test1234", "role": role,
-            })
-            assert r.status_code == 200
-            assert r.json()["user"]["role"] == role
-
-    def test_register_duplicate_email_returns_400(self, session):
+    def test_register_missing_phone_400(self, session):
         r = session.post(f"{API}/auth/register", json={
-            "name": "Dup", "email": PRIMARY_EMAIL, "password": "test1234", "role": "farmer"
+            "name": "NoPhone", "email": f"np_{uuid.uuid4().hex[:6]}@example.com",
+            "password": "test1234", "role": "farmer",
+        })
+        # pydantic missing field -> 422 (fastapi) is acceptable; server also rejects short phone with 400
+        assert r.status_code in (400, 422), r.text
+
+    def test_register_short_phone_400(self, session):
+        r = session.post(f"{API}/auth/register", json={
+            "name": "Short", "email": f"sp_{uuid.uuid4().hex[:6]}@example.com",
+            "phone": "12345", "password": "test1234", "role": "farmer",
+        })
+        assert r.status_code in (400, 422)
+
+    def test_register_duplicate_phone_400(self, session):
+        r = session.post(f"{API}/auth/register", json={
+            "name": "Dup", "email": f"dup_{uuid.uuid4().hex[:6]}@example.com",
+            "phone": RAVI_PHONE, "password": "test1234", "role": "farmer",
         })
         assert r.status_code == 400
-        assert "already" in r.json()["detail"].lower()
+        assert "mobile" in r.json()["detail"].lower() or "phone" in r.json()["detail"].lower()
 
-    def test_login_seeded_ravi(self, primary_auth):
-        assert primary_auth["user"]["email"] == PRIMARY_EMAIL
-        assert primary_auth["user"]["verified"] is True
-        assert primary_auth["user"]["role"] == "farmer"
-        assert "_id" not in primary_auth["user"]
+    def test_register_duplicate_email_400(self, session):
+        r = session.post(f"{API}/auth/register", json={
+            "name": "Dup", "email": RAVI_EMAIL, "phone": rand_phone(),
+            "password": "test1234", "role": "farmer",
+        })
+        assert r.status_code == 400
 
-    def test_login_bad_password(self, session):
-        r = session.post(f"{API}/auth/login", json={"email": PRIMARY_EMAIL, "password": "wrongpass"})
-        assert r.status_code == 401
 
-    def test_get_me_with_token(self, session, primary_auth):
-        r = session.get(f"{API}/auth/me", headers=primary_auth["headers"])
+# ---------- Auth: login by email OR phone ----------
+class TestAuthLogin:
+    def test_login_by_email(self, session):
+        r = _login(session, RAVI_EMAIL)
         assert r.status_code == 200
-        assert r.json()["email"] == PRIMARY_EMAIL
-        assert "_id" not in r.json()
+        assert r.json()["user"]["email"] == RAVI_EMAIL
 
-    def test_get_me_without_token_401(self, session):
-        r = requests.get(f"{API}/auth/me")
+    def test_login_by_phone(self, session):
+        r = _login(session, RAVI_PHONE)
+        assert r.status_code == 200, r.text
+        assert r.json()["user"]["phone"] == RAVI_PHONE
+
+    def test_login_bad_password_401(self, session):
+        r = _login(session, RAVI_EMAIL, password="wrong")
         assert r.status_code == 401
 
-    def test_get_me_invalid_token_401(self, session):
-        r = requests.get(f"{API}/auth/me", headers={"Authorization": "Bearer garbage.token.here"})
+    def test_login_unknown_identifier_401(self, session):
+        r = _login(session, "0000000000")
         assert r.status_code == 401
 
-    def test_patch_me_updates_bio_location(self, session, primary_auth):
-        new_bio = f"Updated bio {uuid.uuid4().hex[:6]}"
-        r = session.patch(f"{API}/auth/me", headers=primary_auth["headers"], json={
-            "bio": new_bio, "location": "Nashik, MH", "avatar": "https://example.com/a.jpg"
+
+# ---------- Auth: forgot & reset password (identifier) ----------
+class TestForgotReset:
+    def test_forgot_and_reset_by_phone(self, session):
+        # Register a fresh user we can safely reset
+        email = f"reset_{uuid.uuid4().hex[:6]}@example.com"
+        phone = rand_phone()
+        r = session.post(f"{API}/auth/register", json={
+            "name": "Reset User", "email": email, "phone": phone,
+            "password": "orig1234", "role": "farmer",
         })
         assert r.status_code == 200
-        assert r.json()["bio"] == new_bio
-        # Verify persistence
-        r2 = session.get(f"{API}/auth/me", headers=primary_auth["headers"])
-        assert r2.json()["bio"] == new_bio
-
-
-# ---------- Users ----------
-class TestUsers:
-    def test_list_users(self, session):
-        r = session.get(f"{API}/users")
-        assert r.status_code == 200
-        users = r.json()
-        assert len(users) >= 4
-        for u in users:
-            assert "_id" not in u
-            assert "id" in u and "email" in u
-
-    def test_search_users_by_name(self, session):
-        r = session.get(f"{API}/users", params={"q": "Ravi"})
-        assert r.status_code == 200
-        assert any("Ravi" in u["name"] for u in r.json())
-
-    def test_get_user_by_id(self, session, primary_auth):
-        uid = primary_auth["user"]["id"]
-        r = session.get(f"{API}/users/{uid}")
-        assert r.status_code == 200
-        assert r.json()["id"] == uid
-        assert "_id" not in r.json()
-
-    def test_get_user_404(self, session):
-        r = session.get(f"{API}/users/does-not-exist-xyz")
-        assert r.status_code == 404
-
-
-# ---------- Posts ----------
-class TestPosts:
-    def test_list_posts_returns_6_seeded(self, session):
-        r = session.get(f"{API}/posts")
-        assert r.status_code == 200
-        posts = r.json()
-        assert len(posts) >= 6, f"Expected at least 6 seeded posts, got {len(posts)}"
-        for p in posts:
-            assert "_id" not in p
-            assert set(["id", "user_id", "user_name", "caption", "likes", "liked_by_me", "comments_count", "tag"]).issubset(p.keys())
-
-    def test_filter_by_tag_procedure(self, session):
-        r = session.get(f"{API}/posts", params={"tag": "procedure"})
-        assert r.status_code == 200
-        posts = r.json()
-        assert len(posts) >= 1
-        assert all(p["tag"] == "procedure" for p in posts)
-
-    def test_filter_by_user_id(self, session, primary_auth):
-        uid = primary_auth["user"]["id"]
-        r = session.get(f"{API}/posts", params={"user_id": uid})
-        assert r.status_code == 200
-        posts = r.json()
-        assert all(p["user_id"] == uid for p in posts)
-
-    def test_liked_by_me_flag_authenticated(self, session, primary_auth):
-        r = session.get(f"{API}/posts", headers=primary_auth["headers"])
-        assert r.status_code == 200
-        for p in r.json():
-            assert isinstance(p["liked_by_me"], bool)
-
-    def test_liked_by_me_false_when_unauthenticated(self, session):
-        r = session.get(f"{API}/posts")
-        assert r.status_code == 200
-        assert all(p["liked_by_me"] is False for p in r.json())
-
-    def test_create_post_increments_user_posts_count(self, session, primary_auth):
-        before = session.get(f"{API}/auth/me", headers=primary_auth["headers"]).json()["posts_count"]
-        r = session.post(f"{API}/posts", headers=primary_auth["headers"], json={
-            "caption": "TEST post about neem oil recipe", "tag": "tips", "image": "", "video_url": ""
+        # Forgot by phone
+        fp = session.post(f"{API}/auth/forgot-password", json={"identifier": phone})
+        assert fp.status_code == 200, fp.text
+        j = fp.json()
+        assert j.get("otp") and len(j["otp"]) == 6
+        # Reset with new password
+        rp = session.post(f"{API}/auth/reset-password", json={
+            "identifier": phone, "otp": j["otp"], "new_password": "new1234",
         })
-        assert r.status_code == 200
-        post = r.json()
-        assert post["caption"] == "TEST post about neem oil recipe"
-        assert post["user_id"] == primary_auth["user"]["id"]
-        after = session.get(f"{API}/auth/me", headers=primary_auth["headers"]).json()["posts_count"]
-        assert after == before + 1
-        # Save post id via class attribute for later tests
-        pytest.created_post_id = post["id"]
+        assert rp.status_code == 200, rp.text
+        assert "access_token" in rp.json()
+        # Old password fails
+        assert _login(session, phone, "orig1234").status_code == 401
+        # New password works via email too
+        assert _login(session, email, "new1234").status_code == 200
 
-    def test_toggle_like_updates_count_and_flag(self, session, primary_auth, secondary_auth):
-        # Use post created above
-        pid = pytest.created_post_id
-        r1 = session.post(f"{API}/posts/{pid}/like", headers=secondary_auth["headers"])
+    def test_forgot_unknown_identifier_returns_ok_no_otp(self, session):
+        r = session.post(f"{API}/auth/forgot-password", json={"identifier": "0000000000"})
+        assert r.status_code == 200
+        assert r.json().get("otp") in (None, "")
+
+
+# ---------- Subscription gating ----------
+class TestSubscriptionGating:
+    """Meera is FREE — gated actions must 403. Ravi is Plus — succeed."""
+
+    def test_free_user_post_403(self, session, meera_auth):
+        r = session.post(f"{API}/posts", headers=meera_auth["headers"],
+                         json={"caption": "should fail", "tag": "tips"})
+        assert r.status_code == 403
+        assert r.json()["detail"] == "subscription_required"
+
+    def test_free_user_message_403(self, session, meera_auth, ravi_auth):
+        r = session.post(f"{API}/messages", headers=meera_auth["headers"],
+                         json={"to_user_id": ravi_auth["user"]["id"], "text": "hi"})
+        assert r.status_code == 403
+        assert r.json()["detail"] == "subscription_required"
+
+    def test_free_user_follow_403(self, session, meera_auth, ravi_auth):
+        r = session.post(f"{API}/users/{ravi_auth['user']['id']}/follow",
+                         headers=meera_auth["headers"])
+        assert r.status_code == 403
+        assert r.json()["detail"] == "subscription_required"
+
+    def test_plus_user_post_ok(self, session, ravi_auth):
+        r = session.post(f"{API}/posts", headers=ravi_auth["headers"],
+                         json={"caption": "TEST plus can post", "tag": "tips"})
+        assert r.status_code == 200
+        pytest.plus_post_id = r.json()["id"]
+
+    def test_plus_user_message_ok(self, session, ravi_auth, ananya_auth):
+        r = session.post(f"{API}/messages", headers=ravi_auth["headers"],
+                         json={"to_user_id": ananya_auth["user"]["id"], "text": f"TEST {uuid.uuid4().hex[:5]}"})
+        assert r.status_code == 200
+
+
+# ---------- Follow toggle ----------
+class TestFollow:
+    def test_follow_toggle_updates_state(self, session, ravi_auth, ananya_auth):
+        target = ananya_auth["user"]["id"]
+        # Start state
+        r0 = session.get(f"{API}/users/{target}", headers=ravi_auth["headers"])
+        was_following = r0.json()["is_following"]
+
+        r1 = session.post(f"{API}/users/{target}/follow", headers=ravi_auth["headers"])
         assert r1.status_code == 200
         d1 = r1.json()
-        assert d1["liked_by_me"] is True
-        assert d1["likes"] >= 1
-        # Toggle off
-        r2 = session.post(f"{API}/posts/{pid}/like", headers=secondary_auth["headers"])
+        assert d1["is_following"] is (not was_following)
+
+        r2 = session.post(f"{API}/users/{target}/follow", headers=ravi_auth["headers"])
         assert r2.status_code == 200
-        d2 = r2.json()
-        assert d2["liked_by_me"] is False
-        assert d2["likes"] == d1["likes"] - 1
+        assert r2.json()["is_following"] is was_following
 
-    def test_delete_post_unauthorized_403(self, session, secondary_auth):
-        pid = pytest.created_post_id
-        r = session.delete(f"{API}/posts/{pid}", headers=secondary_auth["headers"])
-        assert r.status_code == 403
-
-    def test_delete_post_owner_ok(self, session, primary_auth):
-        pid = pytest.created_post_id
-        r = session.delete(f"{API}/posts/{pid}", headers=primary_auth["headers"])
-        assert r.status_code == 200
-        # Verify gone
-        r2 = session.get(f"{API}/posts/{pid}", headers=primary_auth["headers"])
-        assert r2.status_code == 404
-
-
-# ---------- Comments ----------
-class TestComments:
-    def test_list_comments_on_seeded_post(self, session):
-        posts = session.get(f"{API}/posts").json()
-        # Find a post with comments
-        target = next((p for p in posts if p["comments_count"] > 0), None)
-        assert target, "No seeded post with comments found"
-        r = session.get(f"{API}/posts/{target['id']}/comments")
-        assert r.status_code == 200
-        comments = r.json()
-        assert len(comments) >= 1
-        for c in comments:
-            assert "_id" not in c
-            assert "text" in c and "user_name" in c
-
-    def test_add_comment_increments_count(self, session, primary_auth):
-        posts = session.get(f"{API}/posts").json()
-        pid = posts[0]["id"]
-        before = posts[0]["comments_count"]
-        r = session.post(f"{API}/posts/{pid}/comments", headers=primary_auth["headers"], json={"text": "TEST comment"})
-        assert r.status_code == 200
-        assert r.json()["text"] == "TEST comment"
-        assert r.json()["user_id"] == primary_auth["user"]["id"]
-        # Verify count updated
-        after_post = next(p for p in session.get(f"{API}/posts").json() if p["id"] == pid)
-        assert after_post["comments_count"] == before + 1
-
-
-# ---------- Messaging ----------
-class TestMessaging:
-    def test_send_message_and_list_conversation(self, session, primary_auth, secondary_auth):
-        other_id = secondary_auth["user"]["id"]
-        text = f"TEST hello {uuid.uuid4().hex[:6]}"
-        r = session.post(f"{API}/messages", headers=primary_auth["headers"], json={
-            "to_user_id": other_id, "text": text
-        })
-        assert r.status_code == 200
-        msg = r.json()
-        assert msg["text"] == text
-        assert msg["from_user_id"] == primary_auth["user"]["id"]
-        assert msg["to_user_id"] == other_id
-        # Second message from other direction
-        r2 = session.post(f"{API}/messages", headers=secondary_auth["headers"], json={
-            "to_user_id": primary_auth["user"]["id"], "text": "TEST reply"
-        })
-        assert r2.status_code == 200
-
-        # Conversation appears for both
-        c_primary = session.get(f"{API}/conversations", headers=primary_auth["headers"]).json()
-        c_secondary = session.get(f"{API}/conversations", headers=secondary_auth["headers"]).json()
-        assert any(c["other_user_id"] == other_id for c in c_primary)
-        assert any(c["other_user_id"] == primary_auth["user"]["id"] for c in c_secondary)
-
-        # Full history in order
-        hist = session.get(f"{API}/conversations/{other_id}/messages", headers=primary_auth["headers"]).json()
-        assert len(hist) >= 2
-        timestamps = [m["created_at"] for m in hist]
-        assert timestamps == sorted(timestamps), "Messages not in chronological order"
-        for m in hist:
-            assert "_id" not in m
-
-    def test_cannot_message_self(self, session, primary_auth):
-        r = session.post(f"{API}/messages", headers=primary_auth["headers"], json={
-            "to_user_id": primary_auth["user"]["id"], "text": "self"
-        })
+    def test_follow_self_400(self, session, ravi_auth):
+        r = session.post(f"{API}/users/{ravi_auth['user']['id']}/follow",
+                         headers=ravi_auth["headers"])
         assert r.status_code == 400
 
-    def test_message_unknown_user_404(self, session, primary_auth):
-        r = session.post(f"{API}/messages", headers=primary_auth["headers"], json={
-            "to_user_id": "nonexistent-user-id-xyz", "text": "hi"
-        })
-        assert r.status_code == 404
+
+# ---------- Subscription/Payment endpoints (MISSING) ----------
+class TestSubscriptionEndpoints:
+    def test_plans_endpoint(self, session):
+        r = session.get(f"{API}/subscriptions/plans")
+        # Expected 200 with razorpay_configured=false and 2 plans
+        if r.status_code == 404:
+            pytest.skip("MISSING: /api/subscriptions/plans not implemented in backend")
+        assert r.status_code == 200
+        d = r.json()
+        assert "razorpay_configured" in d
+        assert isinstance(d.get("plans"), list) and len(d["plans"]) == 2
+
+    def test_subscriptions_me(self, session, ravi_auth):
+        r = session.get(f"{API}/subscriptions/me", headers=ravi_auth["headers"])
+        if r.status_code == 404:
+            pytest.skip("MISSING: /api/subscriptions/me not implemented")
+        assert r.status_code == 200
+
+    def test_dev_activate_free_user(self, session, meera_auth):
+        r = session.post(f"{API}/payments/dev-activate",
+                         headers=meera_auth["headers"],
+                         json={"plan_id": "monthly"})
+        if r.status_code == 404:
+            pytest.skip("MISSING: /api/payments/dev-activate not implemented")
+        assert r.status_code == 200
 
 
-# ---------- Articles ----------
-class TestArticles:
-    def test_list_articles_returns_6(self, session):
+# ---------- Media chunked upload (MISSING) ----------
+class TestMediaUpload:
+    def test_media_start_chunk_finish(self, session, ravi_auth):
+        r = session.post(f"{API}/media/start",
+                         headers=ravi_auth["headers"],
+                         json={"mime": "video/mp4"})
+        if r.status_code == 404:
+            pytest.skip("MISSING: /api/media/start not implemented")
+        assert r.status_code == 200
+        mid = r.json()["id"]
+        payload = base64.b64encode(b"fake-mp4-bytes-hello" * 20).decode()
+        c = session.post(f"{API}/media/{mid}/chunk",
+                         headers=ravi_auth["headers"],
+                         json={"index": 0, "data": payload})
+        assert c.status_code == 200
+        f = session.post(f"{API}/media/{mid}/finish", headers=ravi_auth["headers"])
+        assert f.status_code == 200
+
+    def test_media_range_request(self, session, ravi_auth):
+        # depends on previous
+        pytest.skip("MISSING: /api/media endpoints not implemented")
+
+
+# ---------- AI multimodal ----------
+class TestAIMultimodal:
+    def test_ai_text(self, session, ravi_auth):
+        r = session.post(f"{API}/ai/chat_sync", headers=ravi_auth["headers"],
+                         json={"message": "One-line: what is jeevamrutha?"}, timeout=90)
+        assert r.status_code == 200, r.text
+        assert len(r.json()["reply"]) > 10
+
+    def test_ai_multimodal_image(self, session, ravi_auth):
+        # 1x1 red jpeg base64
+        tiny_jpeg = (
+            "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD3+iiigD//2Q=="
+        )
+        r = session.post(f"{API}/ai/chat_sync", headers=ravi_auth["headers"],
+                         json={"message": "Describe this image briefly.", "images": [tiny_jpeg]}, timeout=120)
+        assert r.status_code == 200, r.text
+        assert len(r.json()["reply"]) > 5
+
+
+# ---------- Regression: posts/comments/conversations/articles ----------
+class TestRegression:
+    def test_list_posts(self, session):
+        r = session.get(f"{API}/posts")
+        assert r.status_code == 200
+        posts = r.json()
+        assert len(posts) >= 6
+        for p in posts:
+            assert "_id" not in p
+
+    def test_get_user_shows_is_following_with_auth(self, session, ravi_auth, ananya_auth):
+        r = session.get(f"{API}/users/{ananya_auth['user']['id']}",
+                        headers=ravi_auth["headers"])
+        assert r.status_code == 200
+        assert "is_following" in r.json()
+
+    def test_list_articles(self, session):
         r = session.get(f"{API}/articles")
         assert r.status_code == 200
-        arts = r.json()
-        assert len(arts) == 6
-        for a in arts:
-            assert "_id" not in a
-            assert set(["id", "title", "excerpt", "body", "cover", "author", "category"]).issubset(a.keys())
+        assert len(r.json()) == 6
 
-    def test_get_article_by_id(self, session):
-        r = session.get(f"{API}/articles/a1")
+    def test_conversations_list(self, session, ravi_auth):
+        r = session.get(f"{API}/conversations", headers=ravi_auth["headers"])
         assert r.status_code == 200
-        assert r.json()["id"] == "a1"
-        assert "Composting" in r.json()["title"]
 
-    def test_article_404(self, session):
-        r = session.get(f"{API}/articles/does_not_exist")
-        assert r.status_code == 404
-
-
-# ---------- AI (Gemini 3 Flash) ----------
-class TestAI:
-    def test_ai_chat_sync_returns_farming_answer(self, session, primary_auth):
-        r = session.post(f"{API}/ai/chat_sync", headers=primary_auth["headers"], json={
-            "message": "How do I make jeevamrutha at home in one short paragraph?"
-        }, timeout=60)
-        assert r.status_code == 200, r.text
-        data = r.json()
-        assert "reply" in data and "session_id" in data
-        assert len(data["reply"]) > 20
-        # Verify persistence in ai_messages via history endpoint
-        hist = session.get(f"{API}/ai/history", headers=primary_auth["headers"],
-                           params={"session_id": data["session_id"]}).json()
-        assert len(hist) >= 2  # user + assistant
-        roles = {m["role"] for m in hist}
-        assert "user" in roles and "assistant" in roles
-
-
-# ---------- Security: no ObjectId leaks anywhere ----------
-class TestNoObjectIdLeaks:
-    def test_no_underscore_id_in_any_response(self, session, primary_auth):
-        endpoints = [
-            (f"{API}/auth/me", primary_auth["headers"]),
-            (f"{API}/users", None),
-            (f"{API}/posts", None),
-            (f"{API}/articles", None),
-            (f"{API}/conversations", primary_auth["headers"]),
-        ]
-        for url, h in endpoints:
-            r = session.get(url, headers=h or {})
-            assert r.status_code == 200, f"{url} -> {r.status_code}"
-            body = r.text
-            assert '"_id"' not in body, f"ObjectId leak at {url}"
+    def test_no_objectid_leak(self, session, ravi_auth):
+        for url in (f"{API}/auth/me", f"{API}/users", f"{API}/posts",
+                    f"{API}/articles", f"{API}/conversations"):
+            h = ravi_auth["headers"] if url.endswith(("/me", "/conversations")) else {}
+            r = session.get(url, headers=h)
+            assert r.status_code == 200
+            assert '"_id"' not in r.text

@@ -4,23 +4,30 @@
 India's largest platform connecting organic farmers, buyers, experts & learners in one trusted community. **Community-first v1**, with marketplace (buy/sell) planned for v2 once user base grows.
 
 ## v1 MVP Scope (this build)
-- **Community feed**: text + photo + video (YouTube/MP4 URL) posts. Categories: Tips, How-To, Waste Mgmt, Cleanliness, Stories, Questions, General.
-- **Video-first knowledge sharing** — farmers share organic procedures via YouTube links.
+- **Community feed**: text + photo + video (YouTube/MP4 URL, camera recording, gallery upload) posts. Categories (post-time only; feed filter row removed): Organic Tips, How-To Videos, Waste Management, Cleanliness, Success Stories, Questions, General.
+- **Video-first knowledge sharing** — farmers record videos in-app (camera, max 60s, chunked upload to /api/media) or share YouTube links. Playback via expo-video (direct) / WebView (YouTube).
 - **Awareness pillars**: cleanliness, waste management, organic farming.
-- **Authentication**: JWT + bcrypt email/password. Role selection (Farmer / Learner / Expert). Location permission at signup.
-- **Profiles**: verification levels (Basic / Premium / Certified Organic), bio, location, avatar upload, stats.
-- **Direct messaging**: 1:1 chat between any users.
-- **Krishi Sahayak AI**: Gemini 3 Flash chatbot for organic farming, pests, soil, composting, schemes.
-- **Learn**: 6 seeded articles on composting, pest control, soil health, rotation, irrigation, certification.
-- **Comments & likes** on posts.
+- **Authentication**: JWT + bcrypt. Register requires name, email, **10-digit mobile**, password, role (Farmer/Learner/Expert). Login & forgot-password accept **email OR mobile**. OTP reset (dev-mode returns OTP in response).
+- **Profiles**: bio, location (GPS detect w/ permission contract), avatar upload, stats (Posts, Followers only — Level removed), labeled Log out button.
+- **Follow system**: follow/unfollow users (Plus only).
+- **Direct messaging**: 1:1 chat (sending requires Plus).
+- **Krishi Sahayak AI**: Gemini 3 Flash multimodal chatbot — text + attach photos (camera/gallery) + videos (uploaded via media API) like ChatGPT.
+- **Learn**: 6 seeded articles.
+- **Comments & likes** on posts (free).
+
+## Subscription — Krishiva Plus (implemented)
+- Gates: **posting, following, sending chat messages** require an active subscription. Browsing/likes/comments/AI are free.
+- Plans: ₹99/month, ₹999/year (one-time term payment, no auto-renew).
+- Razorpay integration built (web: Standard Checkout, native: hosted Payment Links + verify). **Keys not yet provided → TEST MODE dev-activate endpoint active (MOCKED payment).** Add RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET to backend/.env to go live.
 
 ## v2 Roadmap (deferred)
 - Buy/Sell marketplace (products, orders, payments)
 - Verification workflow (Aadhaar/PAN upload)
-- Premium farmer subscriptions
 - Expert booking (video calls)
 - Push notifications
 - Multi-language (Hindi)
+- Real OTP delivery via SMS/email for password reset
+- Razorpay webhooks for payment recovery
 
 ## Tech Stack
 - **Backend**: FastAPI + MongoDB + JWT + bcrypt + emergentintegrations (Gemini 3 Flash)

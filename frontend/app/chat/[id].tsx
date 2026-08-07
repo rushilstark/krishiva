@@ -33,13 +33,16 @@ export default function ChatScreen() {
 
   const send = async () => {
     if (!text.trim()) return;
+    if (!user?.subscribed) { router.push("/subscribe"); return; }
     const t = text.trim();
     setText("");
     try {
       const msg = await api.sendMessage(otherId!, t);
       setMessages((m) => [...m, msg]);
       setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
-    } catch {}
+    } catch (e: any) {
+      if (e.message === "subscription_required") router.push("/subscribe");
+    }
   };
 
   return (

@@ -4,7 +4,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import { WebView } from "react-native-webview";
-import { colors, spacing, font, radius } from "@/src/theme";
+import { useVideoPlayer, VideoView } from "expo-video";
+import { colors, spacing, font, radius, tagLabel } from "@/src/theme";
 import { timeAgo, initials, toYouTubeEmbed, isDirectVideoUrl } from "@/src/utils";
 import { api } from "@/src/api";
 import * as Haptics from "expo-haptics";
@@ -35,6 +36,7 @@ export default function PostCard({ post, onChanged, onPressComments }: { post: a
 
   const yt = post.video_url ? toYouTubeEmbed(post.video_url) : null;
   const direct = post.video_url && !yt && isDirectVideoUrl(post.video_url);
+  const player = useVideoPlayer(direct ? post.video_url : null, (p) => { p.loop = false; });
 
   return (
     <View style={styles.card} testID={`post-${post.id}`}>
@@ -53,7 +55,7 @@ export default function PostCard({ post, onChanged, onPressComments }: { post: a
           </View>
           <Text style={styles.meta}>{post.user_role} · {timeAgo(post.created_at)}</Text>
         </View>
-        <View style={styles.tag}><Text style={styles.tagText}>{post.tag}</Text></View>
+        <View style={styles.tag}><Text style={styles.tagText}>{tagLabel(post.tag)}</Text></View>
       </Pressable>
 
       {post.caption ? <Text style={styles.caption}>{post.caption}</Text> : null}
@@ -70,13 +72,7 @@ export default function PostCard({ post, onChanged, onPressComments }: { post: a
           />
         </View>
       ) : direct ? (
-        <View style={styles.media}>
-          <WebView
-            source={{ html: `<html><body style="margin:0;background:#000"><video controls playsinline style="width:100%;height:100%;object-fit:contain"><source src="${post.video_url}"/></video></body></html>` }}
-            style={{ flex: 1 }}
-            allowsInlineMediaPlayback
-          />
-        </View>
+        <VideoView player={player} style={styles.media} nativeControls contentFit="contain" />
       ) : post.image ? (
         <Image source={{ uri: post.image }} style={styles.image} contentFit="cover" />
       ) : null}
