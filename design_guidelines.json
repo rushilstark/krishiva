@@ -1,0 +1,150 @@
+{
+  "app_name": "Krishiva",
+  "personality": "1 iOS-Native Clean",
+  "personality_one_liner": "A trustworthy, spacious, and earthy marketplace connecting farmers and buyers with clarity and warmth.",
+  "color": {
+    "surface": "#F9F9F7",
+    "onSurface": "#1A211C",
+    "surfaceSecondary": "#FFFFFF",
+    "onSurfaceSecondary": "#334037",
+    "surfaceTertiary": "#F2F2ED",
+    "onSurfaceTertiary": "#4D5E53",
+    "surfaceInverse": "#1A211C",
+    "onSurfaceInverse": "#FFFFFF",
+    "brand": "#2A7036",
+    "brandPrimary": "#2A7036",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#855E42",
+    "onBrandSecondary": "#FFFFFF",
+    "brandTertiary": "#EBF2EC",
+    "onBrandTertiary": "#2A7036",
+    "success": "#2A7036",
+    "onSuccess": "#FFFFFF",
+    "warning": "#F0A31D",
+    "onWarning": "#FFFFFF",
+    "error": "#D9423E",
+    "onError": "#FFFFFF",
+    "info": "#428761",
+    "onInfo": "#FFFFFF",
+    "border": "#E6E6E1",
+    "borderStrong": "#CCCCCC",
+    "divider": "#E6E6E1"
+  },
+  "typography": {
+    "displayFontFamily": "Plus Jakarta Sans",
+    "textFontFamily": "Plus Jakarta Sans",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Generous iOS-native rhythms. Cards have ample breathing room.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 6,
+    "md": 12,
+    "lg": 20,
+    "pill": 999
+  },
+  "shadow_tier": 1,
+  "navigation": "bottom_tabs",
+  "icon_set": "Phosphor",
+  "glassmorphism": {
+    "enabled": true,
+    "do's": [
+      "Bottom tab bar",
+      "Sticky header backgrounds",
+      "Featured farm/product cards over images",
+      "Floating action buttons"
+    ],
+    "dont's": [
+      "Body content",
+      "Form inputs",
+      "List rows"
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "Marketplace Home",
+      "purpose": "Discover fresh organic produce and trusted local farmers.",
+      "states": {
+        "loading": "Skeleton grids for categories and products.",
+        "empty": "Illustration of an empty basket with 'No products found nearby'.",
+        "error": "Error message with 'Retry connection' button."
+      },
+      "layout": "Top: Featured hero card (glass over farm photo). Middle: Horizontal scroll for Categories (pill chips). Bottom: 2-column masonry or grid for products. Thumb-friendly sticky FAB for 'AI Crop Assistant'."
+    },
+    {
+      "name": "Farmer Profile",
+      "purpose": "Build trust by showcasing the farmer's identity, certifications, and active listings.",
+      "states": {
+        "loading": "Skeleton layout for cover, avatar, and stats.",
+        "empty": "No listings yet.",
+        "error": "Failed to load profile, retry button."
+      },
+      "layout": "Trust-first hierarchy. Top: Cover photo with gradient scrim, circular avatar overlapping bottom edge. Prominent 'Verified Organic' badge next to Name. Row of trust metrics (Rating, Products sold). Bio section. Action buttons (Message, Follow). Bottom: Active listings grid."
+    },
+    {
+      "name": "Community Feed",
+      "purpose": "A space for farmers and buyers to share tips, stories, and photos.",
+      "states": {
+        "loading": "Skeleton post cards.",
+        "empty": "Illustration of a farm sign 'Be the first to post a farming tip!'",
+        "error": "Failed to load feed."
+      },
+      "layout": "Vertical list of post cards. Each card has user avatar, name, verification badge, post text, and image (if any). Action bar with like/comment/share. Glass tab bar at the bottom."
+    }
+  ],
+  "images": {
+    "home_hero_bg": {
+      "url": "https://images.unsplash.com/photo-1635756227689-01eda5140530?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA2MTJ8MHwxfHNlYXJjaHwxfHxvcmdhbmljJTIwZmFybSUyMGxhbmRzY2FwZSUyMGluZGlhfGVufDB8fHx8MTc4NjA5NDU0OXww&ixlib=rb-4.1.0&q=85",
+      "alt": "Lush green organic farm landscape"
+    },
+    "vegetable_basket": {
+      "url": "https://images.unsplash.com/photo-1609842947419-ba4f04d5d60f?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA4Mzl8MHwxfHNlYXJjaHwzfHxvcmdhbmljJTIwdmVnZXRhYmxlcyUyMGJhc2tldHxlbnwwfHx8fDE3ODYwOTQ1NDl8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "Basket of fresh organic vegetables"
+    },
+    "farmer_avatar": {
+      "url": "https://images.unsplash.com/photo-1722925407220-b22e1ced9ee9?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1MDV8MHwxfHNlYXJjaHwyfHxpbmRpYW4lMjBmYXJtZXIlMjBwb3J0cmFpdHxlbnwwfHx8fDE3ODYwOTQ1NDl8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "Portrait of a smiling Indian farmer"
+    }
+  },
+  "haptics": {
+    "primary_button_press": "impactLight",
+    "tab_change": "selection",
+    "like_post": "impactMedium",
+    "verification_badge_tap": "impactLight"
+  },
+  "instructions_to_main_agent": [
+    "Follow 1 iOS-Native Clean layout principles: generous spacing, clear hierarchy, subtle shadow tier 1 for cards.",
+    "Do NOT use pure black or Material indigo/blue. Stick to the earthy botanical palette provided (Forest greens, warm browns, sand).",
+    "Implement a sticky 'AI Crop Assistant' FAB on the home screen using expo-blur over a brandTertiary tinted background.",
+    "Ensure the Farmer Profile prioritizes trust signals (Verified badges) at the top above the fold, before the product listings.",
+    "Apply gradient-to-dark scrims on any image that has text overlaid (like the home hero card or profile cover).",
+    "Use Phosphor icons consistently (filled for active tabs, outlined for inactive/system).",
+    "Include empty, loading, and error states for all three core screens."
+  ]
+}
