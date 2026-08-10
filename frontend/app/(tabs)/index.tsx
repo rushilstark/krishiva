@@ -18,7 +18,7 @@ export default function Feed() {
   const load = useCallback(async () => {
     try {
       const data = await api.listPosts();
-      setPosts(data);
+      setPosts(Array.isArray(data) ? data : []);
     } catch (e) {
       // ignore
     } finally {
@@ -50,7 +50,7 @@ export default function Feed() {
               <Text style={styles.plusPillTxt}>Join Plus</Text>
             </Pressable>
           ) : null}
-          <Pressable testID="header-notif" style={styles.iconBtn}>
+          <Pressable testID="header-notif" style={styles.iconBtn} onPress={() => router.push("/notifications")}>
             <Ionicons name="notifications-outline" size={22} color={colors.onSurface} />
           </Pressable>
         </View>

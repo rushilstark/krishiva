@@ -21,6 +21,8 @@ export default function TabsLayout() {
       }}
     >
       <Tabs.Screen name="index" options={{ title: "Feed", tabBarIcon: ({ color, focused }) => <Ionicons name={focused ? "home" : "home-outline"} size={24} color={color} /> }} />
+      <Tabs.Screen name="market" options={{ href: null }} />
+
       <Tabs.Screen name="learn" options={{ title: "Learn", tabBarIcon: ({ color, focused }) => <Ionicons name={focused ? "book" : "book-outline"} size={24} color={color} /> }} />
       <Tabs.Screen name="ai" options={{ title: "Sahayak", tabBarIcon: ({ color, focused }) => <Ionicons name={focused ? "sparkles" : "sparkles-outline"} size={24} color={color} /> }} />
       <Tabs.Screen name="chats" options={{ title: "Chats", tabBarIcon: ({ color, focused }) => <Ionicons name={focused ? "chatbubbles" : "chatbubbles-outline"} size={24} color={color} /> }} />

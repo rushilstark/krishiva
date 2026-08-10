@@ -3,8 +3,13 @@ from fastapi.responses import StreamingResponse, Response, HTMLResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from mongomock_motor import AsyncMongoMockClient
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 import os
 import logging
+import asyncio
 import uuid
 import jwt
 import bcrypt
@@ -16,23 +21,73 @@ from datetime import datetime, timezone, timedelta
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-MONGO_URL = os.environ['MONGO_URL']
-DB_NAME = os.environ['DB_NAME']
-JWT_SECRET = os.environ['JWT_SECRET']
-JWT_ALGO = os.environ['JWT_ALGO']
-JWT_EXPIRE_DAYS = int(os.environ['JWT_EXPIRE_DAYS'])
-EMERGENT_LLM_KEY = os.environ['EMERGENT_LLM_KEY']
+DB_NAME = os.environ.get('DB_NAME', 'krishiva')
+JWT_SECRET = os.environ.get('JWT_SECRET', 'krishiva-dev-secret-key')
+JWT_ALGO = os.environ.get('JWT_ALGO', 'HS256')
+JWT_EXPIRE_DAYS = int(os.environ.get('JWT_EXPIRE_DAYS', 30))
+OLLAMA_URL = os.environ.get('OLLAMA_URL', 'http://localhost:11434')
 RAZORPAY_KEY_ID = os.environ.get('RAZORPAY_KEY_ID', '')
 RAZORPAY_KEY_SECRET = os.environ.get('RAZORPAY_KEY_SECRET', '')
 RAZORPAY_CONFIGURED = RAZORPAY_KEY_ID.startswith('rzp_') and bool(RAZORPAY_KEY_SECRET)
 UPLOAD_DIR = ROOT_DIR / 'uploads'
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-client = AsyncIOMotorClient(MONGO_URL)
+# --- Circuit Breaker ---
+class CircuitBreaker:
+    def __init__(self, max_failures=3, reset_timeout=60):
+        self.max_failures = max_failures
+        self.reset_timeout = reset_timeout
+        self.failures = 0
+        self.last_failure_time = None
+        self.state = "CLOSED"
+
+    async def call(self, func, *args, **kwargs):
+        now = datetime.now(timezone.utc)
+        if self.state == "OPEN":
+            if (now - self.last_failure_time).total_seconds() > self.reset_timeout:
+                self.state = "HALF_OPEN"
+            else:
+                raise HTTPException(503, "Service temporarily unavailable due to upstream failures (Circuit Open)")
+        
+        try:
+            result = await func(*args, **kwargs)
+            if self.state == "HALF_OPEN":
+                self.state = "CLOSED"
+                self.failures = 0
+            return result
+        except Exception as e:
+            self.failures += 1
+            self.last_failure_time = datetime.now(timezone.utc)
+            if self.failures >= self.max_failures:
+                self.state = "OPEN"
+            raise e
+
+ai_circuit_breaker = CircuitBreaker(max_failures=3, reset_timeout=30)
+
+MONGO_URI = os.environ.get('MONGODB_URI', 'mongodb://localhost:27017/krishiva')
+client = AsyncIOMotorClient(MONGO_URI, serverSelectionTimeoutMS=2000)
 db = client[DB_NAME]
 
 app = FastAPI(title="Krishiva API")
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 api = APIRouter(prefix="/api")
+
+@app.on_event("startup")
+async def startup_event():
+    global client, db
+    try:
+        # Test connection
+        await client.server_info()
+        logger.info("Connected to Real MongoDB!")
+    except Exception:
+        logger.warning("Real MongoDB failed. Falling back to mongomock locally with Dummy Data...")
+        client = AsyncMongoMockClient()
+        db = client[DB_NAME]
+        import seed
+        await seed.run(db)
 
 
 # ---------------------- Models ----------------------
@@ -121,6 +176,7 @@ class PostOut(BaseModel):
 
 class CommentCreate(BaseModel):
     text: str
+    reply_to_id: Optional[str] = None
 
 
 class CommentOut(BaseModel):
@@ -130,6 +186,7 @@ class CommentOut(BaseModel):
     user_name: str
     user_avatar: Optional[str] = ""
     text: str
+    reply_to_id: Optional[str] = None
     created_at: str
 
 
@@ -196,9 +253,76 @@ class ArticleOut(BaseModel):
     created_at: str
 
 
+class CategoryOut(BaseModel):
+    id: str
+    name: str
+    icon: str
+
+
+class SellerOut(BaseModel):
+    name: str
+    location: str
+    rating: float
+    image: str
+
+
+class ProductOut(BaseModel):
+    id: str
+    name: str
+    type: str
+    category: str
+    price: str
+    rating: float
+    reviews: int
+    image: str
+    tag: str
+    description: str
+    seller: SellerOut
+
+
+class OrderOut(BaseModel):
+    id: str
+    date: str
+    status: str
+    items: str
+    total: str
+    image: str
+
+
+class NotificationOut(BaseModel):
+    id: str
+    user_id: str          # recipient
+    actor_id: str         # who triggered it
+    actor_name: str
+    actor_avatar: Optional[str] = ""
+    type: str             # follow | like | comment | message
+    text: str
+    post_id: Optional[str] = None
+    read: bool = False
+    created_at: str
+
+
 # ---------------------- Helpers ----------------------
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+async def create_notification(recipient_id: str, actor: dict, ntype: str, text: str, post_id: Optional[str] = None):
+    """Fire-and-forget helper to insert a notification for a user."""
+    if recipient_id == actor["id"]:
+        return  # never notify yourself
+    await db.notifications.insert_one({
+        "id": str(uuid.uuid4()),
+        "user_id": recipient_id,
+        "actor_id": actor["id"],
+        "actor_name": actor.get("name", "Someone"),
+        "actor_avatar": actor.get("avatar", ""),
+        "type": ntype,
+        "text": text,
+        "post_id": post_id,
+        "read": False,
+        "created_at": now_iso(),
+    })
 
 
 def hash_password(pw: str) -> str:
@@ -309,7 +433,8 @@ def conversation_id_for(a: str, b: str) -> str:
 
 # ---------------------- Auth ----------------------
 @api.post("/auth/register", response_model=TokenOut)
-async def register(body: RegisterIn):
+@limiter.limit("5/minute")
+async def register(request: Request, body: RegisterIn):
     email_lower = body.email.lower()
     phone = normalize_phone(body.phone)
     if len(phone) != 10:
@@ -343,7 +468,8 @@ async def register(body: RegisterIn):
 
 
 @api.post("/auth/login", response_model=TokenOut)
-async def login(body: LoginIn):
+@limiter.limit("5/minute")
+async def login(request: Request, body: LoginIn):
     user = await find_user_by_identifier(body.identifier)
     if not user or not verify_password(body.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -441,6 +567,7 @@ async def toggle_follow(user_id: str, user: dict = Depends(get_current_user)):
     else:
         await db.users.update_one({"id": user_id}, {"$addToSet": {"followers_ids": user["id"]}})
         await db.users.update_one({"id": user["id"]}, {"$addToSet": {"following_ids": user_id}})
+        await create_notification(user_id, user, "follow", f"{user['name']} started following you.")
     target = await db.users.find_one({"id": user_id}, {"_id": 0})
     return user_to_public(target, user["id"])
 
@@ -540,6 +667,7 @@ async def toggle_like(post_id: str, user: dict = Depends(get_current_user)):
         await db.posts.update_one({"id": post_id}, {"$pull": {"liked_by": user["id"]}})
     else:
         await db.posts.update_one({"id": post_id}, {"$addToSet": {"liked_by": user["id"]}})
+        await create_notification(p["user_id"], user, "like", f"{user['name']} liked your post.", post_id=post_id)
     p = await db.posts.find_one({"id": post_id}, {"_id": 0})
     return await hydrate_post(p, user["id"])
 
@@ -582,12 +710,16 @@ async def add_comment(post_id: str, body: CommentCreate, user: dict = Depends(ge
         "post_id": post_id,
         "user_id": user["id"],
         "text": body.text,
+        "reply_to_id": body.reply_to_id,
         "created_at": now_iso(),
     }
     await db.comments.insert_one(c)
     await db.posts.update_one({"id": post_id}, {"$inc": {"comments_count": 1}})
+    snippet = body.text[:60] + ("…" if len(body.text) > 60 else "")
+    await create_notification(p["user_id"], user, "comment", f"{user['name']} commented: {snippet}", post_id=post_id)
     return CommentOut(
         id=c["id"], post_id=post_id, user_id=user["id"],
+        reply_to_id=c.get("reply_to_id"),
         user_name=user["name"], user_avatar=user.get("avatar", ""),
         text=c["text"], created_at=c["created_at"],
     )
@@ -653,7 +785,35 @@ async def send_message(body: MessageCreate, user: dict = Depends(get_current_use
         }},
         upsert=True,
     )
+    await create_notification(body.to_user_id, user, "message", f"{user['name']} sent you a message.")
     return MessageOut(**msg)
+
+
+# ---------------------- Notifications ----------------------
+@api.get("/notifications", response_model=List[NotificationOut])
+async def list_notifications(user: dict = Depends(get_current_user)):
+    notifs = await db.notifications.find(
+        {"user_id": user["id"]}, {"_id": 0}
+    ).sort("created_at", -1).limit(100).to_list(100)
+    return notifs
+
+
+@api.get("/notifications/unread_count")
+async def unread_count(user: dict = Depends(get_current_user)):
+    count = await db.notifications.count_documents({"user_id": user["id"], "read": False})
+    return {"count": count}
+
+
+@api.post("/notifications/read_all")
+async def mark_all_read(user: dict = Depends(get_current_user)):
+    await db.notifications.update_many({"user_id": user["id"], "read": False}, {"$set": {"read": True}})
+    return {"ok": True}
+
+
+@api.post("/notifications/{notif_id}/read")
+async def mark_one_read(notif_id: str, user: dict = Depends(get_current_user)):
+    await db.notifications.update_one({"id": notif_id, "user_id": user["id"]}, {"$set": {"read": True}})
+    return {"ok": True}
 
 
 # ---------------------- Articles ----------------------
@@ -740,6 +900,35 @@ async def get_article(article_id: str):
     raise HTTPException(404, "Not found")
 
 
+@api.get("/categories", response_model=List[CategoryOut])
+async def list_categories():
+    cursor = db.categories.find({}, {"_id": 0})
+    items = await cursor.to_list(length=100)
+    return [CategoryOut(**x) for x in items]
+
+
+@api.get("/products", response_model=List[ProductOut])
+async def list_products():
+    cursor = db.products.find({}, {"_id": 0})
+    items = await cursor.to_list(length=100)
+    return [ProductOut(**x) for x in items]
+
+
+@api.get("/products/{product_id}", response_model=ProductOut)
+async def get_product(product_id: str):
+    p = await db.products.find_one({"id": product_id}, {"_id": 0})
+    if not p:
+        raise HTTPException(404, "Not found")
+    return ProductOut(**p)
+
+
+@api.get("/orders", response_model=List[OrderOut])
+async def list_orders(user: dict = Depends(get_current_user)):
+    cursor = db.orders.find({}, {"_id": 0})
+    items = await cursor.to_list(length=100)
+    return [OrderOut(**x) for x in items]
+
+
 # ---------------------- AI Assistant (Gemini 3 Flash) ----------------------
 SYSTEM_PROMPT = (
     "You are Krishiva Sahayak — a warm, knowledgeable AI assistant for Indian organic farmers. "
@@ -753,7 +942,7 @@ SYSTEM_PROMPT = (
 
 @api.post("/ai/chat")
 async def ai_chat(body: AIChatIn, user: dict = Depends(get_current_user)):
-    from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone
+    from litellm import acompletion
 
     session_id = body.session_id or f"{user['id']}-{uuid.uuid4()}"
 
@@ -767,21 +956,26 @@ async def ai_chat(body: AIChatIn, user: dict = Depends(get_current_user)):
         "created_at": now_iso(),
     })
 
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=session_id,
-        system_message=SYSTEM_PROMPT,
-    ).with_model("gemini", "gemini-3-flash-preview")
-
     async def event_generator():
         buffer = ""
         try:
-            async for ev in chat.stream_message(UserMessage(text=body.message)):
-                if isinstance(ev, TextDelta):
-                    buffer += ev.content
-                    yield f"data: {ev.content}\n\n".replace("\n\n", "\n\n")  # SSE frame
-                elif isinstance(ev, StreamDone):
-                    break
+            messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+            history = await db.ai_messages.find({"session_id": session_id}).sort("created_at", 1).to_list(10)
+            for m in history:
+                if m.get("text"):
+                    messages.append({"role": m["role"], "content": m["text"]})
+            
+            response = await acompletion(
+                model="ollama/llama3",
+                messages=messages,
+                api_base=OLLAMA_URL,
+                stream=True
+            )
+            async for chunk in response:
+                content = chunk.choices[0].delta.content
+                if content:
+                    buffer += content
+                    yield f"data: {content}\n\n".replace("\n\n", "\n\n")  # SSE frame
         except Exception as e:
             logger.exception("AI stream error")
             yield f"data: [error] {str(e)}\n\n"
@@ -815,20 +1009,10 @@ async def ai_history(session_id: Optional[str] = None, user: dict = Depends(get_
 
 @api.post("/ai/chat_sync")
 async def ai_chat_sync(body: AIChatIn, user: dict = Depends(get_current_user)):
-    """Non-streaming chat. Supports multimodal: base64 images and uploaded videos (Gemini)."""
-    from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent, FileContentWithMimeType
+    """Non-streaming chat. Falls back to Ollama/Llama3."""
+    from litellm import acompletion
 
     session_id = body.session_id or f"{user['id']}-{uuid.uuid4()}"
-
-    file_contents = []
-    for img in (body.images or [])[:4]:
-        b64 = img.split(",", 1)[1] if img.startswith("data:") else img
-        file_contents.append(ImageContent(image_base64=b64))
-    if body.video_media_id:
-        m = await db.media.find_one({"id": body.video_media_id, "status": "ready"}, {"_id": 0})
-        vpath = UPLOAD_DIR / f"{body.video_media_id}.bin"
-        if m and vpath.exists():
-            file_contents.append(FileContentWithMimeType(file_path=str(vpath), mime_type=m.get("mime", "video/mp4")))
 
     await db.ai_messages.insert_one({
         "id": str(uuid.uuid4()),
@@ -841,18 +1025,23 @@ async def ai_chat_sync(body: AIChatIn, user: dict = Depends(get_current_user)):
         "created_at": now_iso(),
     })
 
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=session_id,
-        system_message=SYSTEM_PROMPT,
-    ).with_model("gemini", "gemini-3-flash-preview")
-
     try:
-        reply = await chat.send_message(UserMessage(text=body.message, file_contents=file_contents or None))
-        reply_text = reply if isinstance(reply, str) else str(reply)
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        history = await db.ai_messages.find({"session_id": session_id}).sort("created_at", 1).to_list(10)
+        for m in history:
+            if m.get("text"):
+                messages.append({"role": m["role"], "content": m["text"]})
+
+        reply = await ai_circuit_breaker.call(
+            acompletion,
+            model="ollama/llama3",
+            messages=messages,
+            api_base=OLLAMA_URL
+        )
+        reply_text = reply.choices[0].message.content
     except Exception as e:
-        logger.exception("AI sync error")
-        raise HTTPException(500, f"AI error: {str(e)}")
+        logger.exception("AI sync error (Circuit breaker tripped?)")
+        raise HTTPException(503, f"AI service unavailable: {str(e)}")
 
     await db.ai_messages.insert_one({
         "id": str(uuid.uuid4()),
@@ -1133,10 +1322,11 @@ async def root():
 
 app.include_router(api)
 
+ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )

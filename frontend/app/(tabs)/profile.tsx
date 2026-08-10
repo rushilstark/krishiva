@@ -3,7 +3,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import { colors, spacing, font, radius } from "@/src/theme";
@@ -24,6 +24,8 @@ export default function Profile() {
   const [location, setLocation] = useState(user?.location || "");
   const [saving, setSaving] = useState(false);
   const [locLoading, setLocLoading] = useState(false);
+  const [unread, setUnread] = useState(0);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const detectLocation = async () => {
     setLocLoading(true);
@@ -52,6 +54,19 @@ export default function Profile() {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { setName(user?.name || ""); setBio(user?.bio || ""); setLocation(user?.location || ""); }, [user]);
+
+  // Poll unread notification count every 30s
+  useEffect(() => {
+    const fetchCount = async () => {
+      try {
+        const res = await api.notificationUnreadCount();
+        setUnread(res.count ?? 0);
+      } catch {}
+    };
+    fetchCount();
+    pollRef.current = setInterval(fetchCount, 30000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
 
   const pickAvatar = async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -87,6 +102,18 @@ export default function Profile() {
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: spacing.xxxl }}>
+        {/* Header row with notification bell */}
+        <View style={styles.topBar}>
+          <Text style={styles.topBarTitle}>{user.name.split(" ")[0]}</Text>
+          <Pressable testID="notifications-btn" onPress={() => router.push("/notifications")} style={styles.bellWrap}>
+            <Ionicons name="notifications-outline" size={24} color={colors.onSurface} />
+            {unread > 0 && (
+              <View style={styles.badge}>
+                <Text style={styles.badgeTxt}>{unread > 9 ? "9+" : unread}</Text>
+              </View>
+            )}
+          </Pressable>
+        </View>
         <View style={styles.hero}>
           <Pressable testID="pick-avatar" onPress={pickAvatar}>
             {user.avatar ? (
@@ -223,4 +250,9 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: font.size.lg, fontWeight: "700", color: colors.onSurface },
   emptyPosts: { alignItems: "center", padding: spacing.xl, gap: spacing.md },
   emptyTxt: { color: colors.onSurfaceTertiary, textAlign: "center", fontSize: font.size.base },
+  topBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.sm, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border },
+  topBarTitle: { fontSize: font.size.xl, fontWeight: "700", color: colors.onSurface },
+  bellWrap: { position: "relative", width: 40, height: 40, alignItems: "center", justifyContent: "center" },
+  badge: { position: "absolute", top: 2, right: 2, minWidth: 18, height: 18, borderRadius: 9, backgroundColor: colors.error, alignItems: "center", justifyContent: "center", paddingHorizontal: 4, borderWidth: 2, borderColor: colors.surface },
+  badgeTxt: { color: "#fff", fontSize: 10, fontWeight: "800", lineHeight: 14 },
 });

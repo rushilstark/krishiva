@@ -113,17 +113,6 @@ export default function CreatePost() {
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.md }} keyboardShouldPersistTaps="handled">
-          <Text style={styles.label}>Category</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.sm }}>
-            {POST_TAGS.map((t) => {
-              const active = tag === t.id;
-              return (
-                <Pressable key={t.id} testID={`tag-${t.id}`} style={[styles.chip, active && styles.chipActive]} onPress={() => setTag(t.id)}>
-                  <Text style={[styles.chipText, active && styles.chipTextActive]}>{t.emoji} {t.label}</Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
 
           <TextInput
             testID="caption-input"
@@ -163,34 +152,8 @@ export default function CreatePost() {
               <Ionicons name="camera-outline" size={22} color={colors.brand} />
               <Text style={styles.attachTxt}>Camera</Text>
             </Pressable>
-            <Pressable testID="record-video" style={styles.attachBtn} onPress={recordVideo}>
-              <Ionicons name="videocam-outline" size={22} color={colors.brand} />
-              <Text style={styles.attachTxt}>Record</Text>
-            </Pressable>
-            <Pressable testID="pick-image" style={styles.attachBtn} onPress={pickImage}>
-              <Ionicons name="image-outline" size={22} color={colors.brand} />
-              <Text style={styles.attachTxt}>Photo</Text>
-            </Pressable>
-            <Pressable testID="pick-video" style={styles.attachBtn} onPress={pickVideo}>
-              <Ionicons name="film-outline" size={22} color={colors.brand} />
-              <Text style={styles.attachTxt}>Video</Text>
-            </Pressable>
           </View>
 
-          <Text style={styles.label}>Or paste a video link (YouTube / MP4)</Text>
-          <View style={styles.linkField}>
-            <Ionicons name="link-outline" size={20} color={colors.muted} />
-            <TextInput
-              testID="video-url-input"
-              style={{ flex: 1, fontSize: font.size.base, color: colors.onSurface }}
-              placeholder="https://youtube.com/watch?v=…"
-              placeholderTextColor={colors.muted}
-              value={videoUrl}
-              onChangeText={(v) => { setVideoUrl(v); if (v) setUploadedVideo(null); }}
-              autoCapitalize="none"
-            />
-          </View>
-          <Text style={styles.hint}>Tip: Record up to 60s directly from your camera, or share YouTube videos of organic procedures, composting & waste management.</Text>
 
           {err ? <Text style={styles.err}>{err}</Text> : null}
         </ScrollView>
