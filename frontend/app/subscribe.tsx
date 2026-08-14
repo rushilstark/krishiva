@@ -1,19 +1,31 @@
-import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, Platform } from "react-native";
+import {
+  View, Text, StyleSheet, Pressable, ScrollView,
+  ActivityIndicator, Platform, Animated, Dimensions,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as WebBrowser from "expo-web-browser";
-import { colors, spacing, font, radius } from "@/src/theme";
+import { colors, spacing, font, radius, shadow } from "@/src/theme";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
 
+const { width: W } = Dimensions.get("window");
+
 const BENEFITS = [
-  { icon: "videocam", text: "Post photos & videos to the community" },
-  { icon: "person-add", text: "Follow farmers, experts & learners" },
-  { icon: "chatbubbles", text: "Direct chat with anyone on Krishiva" },
-  { icon: "leaf", text: "Support India's organic farming movement" },
+  { icon: "leaf-outline",        color: "#2A7036", bg: "#EBF2EC", text: "Post photos & videos to the community" },
+  { icon: "people-outline",      color: "#5B8DEF", bg: "#EBF0FD", text: "Follow farmers, experts & learners" },
+  { icon: "chatbubbles-outline", color: "#9B59B6", bg: "#F3EBFD", text: "Direct chat with anyone on Krishiva" },
+  { icon: "sparkles-outline",    color: "#F0A31D", bg: "#FEF6E4", text: "Full access to Krishiva AI Sahayak" },
+  { icon: "shield-checkmark-outline", color: "#2A7036", bg: "#EBF2EC", text: "Verified member badge on your profile" },
+];
+
+const TRUST = [
+  { icon: "lock-closed-outline", label: "Secure Payment" },
+  { icon: "refresh-outline",     label: "No Auto-Renewal" },
+  { icon: "shield-outline",      label: "Razorpay Protected" },
 ];
 
 function loadRazorpayScript(): Promise<void> {
@@ -38,13 +50,40 @@ export default function Subscribe() {
   const [done, setDone] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // Animations
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(30)).current;
+  const monthlyScale = useRef(new Animated.Value(1)).current;
+  const yearlyScale = useRef(new Animated.Value(1.02)).current;
+  const successScale = useRef(new Animated.Value(0)).current;
+  const successOpacity = useRef(new Animated.Value(0)).current;
+
   useEffect(() => {
     api.getPlans().then(setCfg).catch(() => setErr("Could not load plans"));
+    Animated.parallel([
+      Animated.timing(fadeAnim, { toValue: 1, duration: 500, useNativeDriver: true }),
+      Animated.timing(slideAnim, { toValue: 0, duration: 500, useNativeDriver: true }),
+    ]).start();
   }, []);
+
+  const selectPlan = (p: "monthly" | "yearly") => {
+    setPlan(p);
+    Animated.spring(p === "monthly" ? monthlyScale : yearlyScale, {
+      toValue: 1.04, friction: 6, useNativeDriver: true,
+    }).start(() => {
+      Animated.spring(p === "monthly" ? monthlyScale : yearlyScale, {
+        toValue: 1, friction: 6, useNativeDriver: true,
+      }).start();
+    });
+  };
 
   const finishSuccess = async () => {
     await refresh();
     setDone(true);
+    Animated.parallel([
+      Animated.spring(successScale, { toValue: 1, friction: 5, tension: 60, useNativeDriver: true }),
+      Animated.timing(successOpacity, { toValue: 1, duration: 400, useNativeDriver: true }),
+    ]).start();
   };
 
   const pay = async () => {
@@ -52,7 +91,6 @@ export default function Subscribe() {
     setPaying(true);
     try {
       if (!cfg?.razorpay_configured) {
-        // TEST MODE — activates instantly until Razorpay keys are configured
         await api.devActivate(plan);
         await finishSuccess();
         return;
@@ -99,7 +137,7 @@ export default function Subscribe() {
       if (s.subscribed) {
         await finishSuccess();
       } else {
-        setErr("Payment not confirmed yet. If you completed it, wait a few seconds and tap again.");
+        setErr("Payment not confirmed yet. Wait a moment and tap again.");
       }
     } catch (e: any) {
       setErr(e.message || "Could not check payment status");
@@ -108,127 +146,389 @@ export default function Subscribe() {
     }
   };
 
+  // ── SUCCESS SCREEN ──
   if (done) {
     return (
-      <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
-        <View style={styles.doneWrap}>
-          <View style={styles.doneIcon}><Ionicons name="checkmark" size={44} color="#fff" /></View>
-          <Text style={styles.doneTitle}>Welcome to Krishiva Plus! 🌱</Text>
-          <Text style={styles.doneSub}>You can now post photos & videos, follow anyone and chat directly.</Text>
-          <Pressable testID="sub-done" style={styles.payBtn} onPress={() => router.back()}>
-            <Text style={styles.payBtnTxt}>Start exploring</Text>
-          </Pressable>
-        </View>
-      </SafeAreaView>
+      <View style={styles.container}>
+        <LinearGradient colors={["#1A4A22", "#2A7036", "#3D9A4A"]} style={StyleSheet.absoluteFill} />
+        <SafeAreaView style={styles.successSafe} edges={["top", "bottom"]}>
+          <Animated.View style={[styles.successWrap, { opacity: successOpacity, transform: [{ scale: successScale }] }]}>
+            <View style={styles.successRing}>
+              <View style={styles.successCircle}>
+                <Ionicons name="checkmark" size={48} color="#fff" />
+              </View>
+            </View>
+            <Text style={styles.successTitle}>Welcome to Krishiva Plus! 🌱</Text>
+            <Text style={styles.successSub}>
+              You're now a verified member. Start posting, following and chatting with India's organic farming community.
+            </Text>
+            <View style={styles.successBadgeRow}>
+              <View style={styles.successBadge}>
+                <Ionicons name="shield-checkmark" size={14} color="#2A7036" />
+                <Text style={styles.successBadgeTxt}>Verified Member</Text>
+              </View>
+            </View>
+            <Pressable testID="sub-done" style={styles.successBtn} onPress={() => router.back()}>
+              <Text style={styles.successBtnTxt}>Start Exploring</Text>
+              <Ionicons name="arrow-forward" size={18} color="#2A7036" />
+            </Pressable>
+          </Animated.View>
+        </SafeAreaView>
+      </View>
     );
   }
 
+  // ── MAIN SCREEN ──
   return (
-    <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
-      <ScrollView contentContainerStyle={{ paddingBottom: spacing.xl }} showsVerticalScrollIndicator={false}>
-        <LinearGradient colors={["#2A7036", "#1A4A22"]} style={styles.hero}>
-          <Pressable testID="sub-close" style={styles.closeBtn} onPress={() => router.back()} hitSlop={10}>
-            <Ionicons name="close" size={24} color="#fff" />
-          </Pressable>
-          <View style={styles.crown}><Ionicons name="sparkles" size={30} color="#F0A31D" /></View>
-          <Text style={styles.heroTitle}>Krishiva Plus</Text>
-          <Text style={styles.heroSub}>{"Become a full member of India's organic farming community"}</Text>
-        </LinearGradient>
+    <View style={styles.container}>
+      <SafeAreaView style={{ flex: 1 }} edges={["top", "bottom"]}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: spacing.xxxl }}
+          bounces={false}
+        >
+          {/* ── Hero ── */}
+          <LinearGradient
+            colors={["#0F3018", "#1A4A22", "#2A7036"]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.hero}
+          >
+            <Pressable testID="sub-close" style={styles.closeBtn} onPress={() => router.back()} hitSlop={12}>
+              <Ionicons name="close" size={22} color="rgba(255,255,255,0.8)" />
+            </Pressable>
 
-        <View style={styles.body}>
-          {BENEFITS.map((b) => (
-            <View key={b.text} style={styles.benefit}>
-              <View style={styles.benefitIcon}><Ionicons name={b.icon as any} size={18} color={colors.brand} /></View>
-              <Text style={styles.benefitTxt}>{b.text}</Text>
-            </View>
-          ))}
-
-          {!cfg ? (
-            <ActivityIndicator color={colors.brand} style={{ marginTop: spacing.xl }} />
-          ) : (
-            <>
-              <View style={styles.planRow}>
-                <Pressable
-                  testID="plan-monthly"
-                  style={[styles.planCard, plan === "monthly" && styles.planActive]}
-                  onPress={() => setPlan("monthly")}
-                >
-                  <Text style={[styles.planName, plan === "monthly" && { color: colors.brand }]}>Monthly</Text>
-                  <Text style={styles.planPrice}>₹99</Text>
-                  <Text style={styles.planPer}>per month</Text>
-                </Pressable>
-                <Pressable
-                  testID="plan-yearly"
-                  style={[styles.planCard, plan === "yearly" && styles.planActive]}
-                  onPress={() => setPlan("yearly")}
-                >
-                  <View style={styles.bestBadge}><Text style={styles.bestBadgeTxt}>BEST VALUE</Text></View>
-                  <Text style={[styles.planName, plan === "yearly" && { color: colors.brand }]}>Yearly</Text>
-                  <Text style={styles.planPrice}>₹999</Text>
-                  <Text style={styles.planPer}>per year · 2 months free</Text>
-                </Pressable>
+            <Animated.View style={{ alignItems: "center", opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
+              {/* Crown badge */}
+              <View style={styles.crownWrap}>
+                <LinearGradient colors={["#F5D67A", "#F0A31D"]} style={styles.crownGrad}>
+                  <Ionicons name="sparkles" size={28} color="#fff" />
+                </LinearGradient>
               </View>
 
-              {!cfg.razorpay_configured ? (
-                <View style={styles.devBanner}>
-                  <Ionicons name="flask-outline" size={16} color={colors.warning} />
-                  <Text style={styles.devBannerTxt}>Test mode — payment gateway keys not added yet. Subscription activates instantly for testing.</Text>
+              <Text style={styles.heroLabel}>KRISHIVA PLUS</Text>
+              <Text style={styles.heroTitle}>Join India's Organic{"\n"}Farming Community</Text>
+              <Text style={styles.heroSub}>One subscription — unlock everything</Text>
+
+              {/* Floating stats */}
+              <View style={styles.statsRow}>
+                <View style={styles.statPill}>
+                  <Text style={styles.statNum}>10K+</Text>
+                  <Text style={styles.statLbl}>Farmers</Text>
                 </View>
-              ) : null}
+                <View style={styles.statDivider} />
+                <View style={styles.statPill}>
+                  <Text style={styles.statNum}>₹99</Text>
+                  <Text style={styles.statLbl}>Per month</Text>
+                </View>
+                <View style={styles.statDivider} />
+                <View style={styles.statPill}>
+                  <Text style={styles.statNum}>100%</Text>
+                  <Text style={styles.statLbl}>Organic</Text>
+                </View>
+              </View>
+            </Animated.View>
+          </LinearGradient>
 
-              {err ? <Text style={styles.err} testID="sub-error">{err}</Text> : null}
+          <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
+            {/* ── Benefits ── */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Everything included</Text>
+              <View style={styles.benefitsList}>
+                {BENEFITS.map((b) => (
+                  <View key={b.text} style={styles.benefit}>
+                    <View style={[styles.benefitIcon, { backgroundColor: b.bg }]}>
+                      <Ionicons name={b.icon as any} size={18} color={b.color} />
+                    </View>
+                    <Text style={styles.benefitTxt}>{b.text}</Text>
+                    <Ionicons name="checkmark-circle" size={18} color={colors.brand} />
+                  </View>
+                ))}
+              </View>
+            </View>
 
-              {awaitingLink ? (
-                <Pressable testID="sub-check-paid" style={[styles.payBtn, checking && { opacity: 0.7 }]} onPress={checkPaid} disabled={checking}>
-                  {checking ? <ActivityIndicator color="#fff" /> : <Text style={styles.payBtnTxt}>{"I've completed payment"}</Text>}
-                </Pressable>
-              ) : null}
+            {/* ── Plan Cards ── */}
+            {!cfg ? (
+              <ActivityIndicator color={colors.brand} style={{ marginVertical: spacing.xl }} />
+            ) : (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Choose your plan</Text>
+                <View style={styles.planRow}>
 
-              <Pressable testID="sub-pay" style={[styles.payBtn, paying && { opacity: 0.7 }]} onPress={pay} disabled={paying}>
-                {paying ? <ActivityIndicator color="#fff" /> : (
-                  <Text style={styles.payBtnTxt}>
-                    {cfg.razorpay_configured
-                      ? `Pay ${plan === "monthly" ? "₹99" : "₹999"} with Razorpay`
-                      : `Activate ${plan === "monthly" ? "Monthly" : "Yearly"} (Test Mode)`}
-                  </Text>
+                  {/* Monthly */}
+                  <Animated.View style={[{ flex: 1 }, { transform: [{ scale: monthlyScale }] }]}>
+                    <Pressable
+                      testID="plan-monthly"
+                      style={[styles.planCard, plan === "monthly" && styles.planActive]}
+                      onPress={() => selectPlan("monthly")}
+                    >
+                      {plan === "monthly" && (
+                        <LinearGradient colors={["#EBF2EC", "#D4EBD7"]} style={StyleSheet.absoluteFill} borderRadius={16} />
+                      )}
+                      <Ionicons
+                        name="calendar-outline"
+                        size={22}
+                        color={plan === "monthly" ? colors.brand : colors.muted}
+                      />
+                      <Text style={[styles.planName, plan === "monthly" && styles.planNameActive]}>Monthly</Text>
+                      <Text style={[styles.planPrice, plan === "monthly" && styles.planPriceActive]}>₹99</Text>
+                      <Text style={styles.planPer}>/ month</Text>
+                      {plan === "monthly" && (
+                        <View style={styles.selectedDot}>
+                          <Ionicons name="checkmark" size={12} color="#fff" />
+                        </View>
+                      )}
+                    </Pressable>
+                  </Animated.View>
+
+                  {/* Yearly */}
+                  <Animated.View style={[{ flex: 1 }, { transform: [{ scale: yearlyScale }] }]}>
+                    <Pressable
+                      testID="plan-yearly"
+                      style={[styles.planCard, plan === "yearly" && styles.planActive]}
+                      onPress={() => selectPlan("yearly")}
+                    >
+                      {plan === "yearly" && (
+                        <LinearGradient colors={["#EBF2EC", "#D4EBD7"]} style={StyleSheet.absoluteFill} borderRadius={16} />
+                      )}
+                      <View style={styles.bestBadge}>
+                        <Text style={styles.bestBadgeTxt}>BEST VALUE</Text>
+                      </View>
+                      <Ionicons
+                        name="star-outline"
+                        size={22}
+                        color={plan === "yearly" ? colors.brand : colors.muted}
+                      />
+                      <Text style={[styles.planName, plan === "yearly" && styles.planNameActive]}>Yearly</Text>
+                      <Text style={[styles.planPrice, plan === "yearly" && styles.planPriceActive]}>₹999</Text>
+                      <Text style={styles.planPer}>/ year</Text>
+                      <Text style={styles.planSave}>Save ₹189</Text>
+                      {plan === "yearly" && (
+                        <View style={styles.selectedDot}>
+                          <Ionicons name="checkmark" size={12} color="#fff" />
+                        </View>
+                      )}
+                    </Pressable>
+                  </Animated.View>
+                </View>
+
+                {/* Dev mode banner */}
+                {!cfg.razorpay_configured && (
+                  <View style={styles.devBanner}>
+                    <Ionicons name="flask-outline" size={15} color="#8A6A1F" />
+                    <Text style={styles.devBannerTxt}>
+                      Test mode — tap below to activate instantly without payment.
+                    </Text>
+                  </View>
                 )}
-              </Pressable>
-              <Text style={styles.smallPrint}>One-time payment for the selected term. No auto-renewal. Cancel anytime by simply not renewing.</Text>
-            </>
-          )}
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+
+                {err ? (
+                  <View style={styles.errBox}>
+                    <Ionicons name="alert-circle-outline" size={16} color={colors.error} />
+                    <Text style={styles.errTxt} testID="sub-error">{err}</Text>
+                  </View>
+                ) : null}
+
+                {/* Payment CTA */}
+                {awaitingLink ? (
+                  <Pressable
+                    testID="sub-check-paid"
+                    style={[styles.payBtn, checking && { opacity: 0.7 }]}
+                    onPress={checkPaid}
+                    disabled={checking}
+                  >
+                    {checking
+                      ? <ActivityIndicator color="#fff" />
+                      : <Text style={styles.payBtnTxt}>I've completed payment ✓</Text>
+                    }
+                  </Pressable>
+                ) : (
+                  <Pressable
+                    testID="sub-pay"
+                    style={[styles.payBtn, paying && { opacity: 0.7 }]}
+                    onPress={pay}
+                    disabled={paying}
+                  >
+                    <LinearGradient
+                      colors={["#2E8040", "#2A7036", "#1F5428"]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                      style={styles.payBtnGrad}
+                    >
+                      {paying ? (
+                        <ActivityIndicator color="#fff" />
+                      ) : (
+                        <>
+                          <Ionicons
+                            name={cfg.razorpay_configured ? "card-outline" : "flash-outline"}
+                            size={20}
+                            color="#fff"
+                          />
+                          <Text style={styles.payBtnTxt}>
+                            {cfg.razorpay_configured
+                              ? `Pay ${plan === "monthly" ? "₹99" : "₹999"} with Razorpay`
+                              : `Activate ${plan === "monthly" ? "Monthly" : "Yearly"} — Test Mode`}
+                          </Text>
+                        </>
+                      )}
+                    </LinearGradient>
+                  </Pressable>
+                )}
+
+                {/* Trust badges */}
+                <View style={styles.trustRow}>
+                  {TRUST.map((t) => (
+                    <View key={t.label} style={styles.trustItem}>
+                      <Ionicons name={t.icon as any} size={14} color={colors.muted} />
+                      <Text style={styles.trustTxt}>{t.label}</Text>
+                    </View>
+                  ))}
+                </View>
+
+                <Text style={styles.smallPrint}>
+                  One-time payment for selected term. No auto-renewal. Verified badge granted on activation.
+                </Text>
+              </View>
+            )}
+          </Animated.View>
+        </ScrollView>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface },
-  hero: { alignItems: "center", paddingTop: spacing.xxl, paddingBottom: spacing.xxl, paddingHorizontal: spacing.xl, borderBottomLeftRadius: 28, borderBottomRightRadius: 28 },
-  closeBtn: { position: "absolute", top: spacing.md, right: spacing.md, width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center" },
-  crown: { width: 64, height: 64, borderRadius: 32, backgroundColor: "rgba(255,255,255,0.12)", alignItems: "center", justifyContent: "center", marginBottom: spacing.md },
-  heroTitle: { color: "#fff", fontSize: 28, fontWeight: "700" },
-  heroSub: { color: "rgba(255,255,255,0.85)", fontSize: font.size.base, textAlign: "center", marginTop: spacing.xs, lineHeight: 20 },
-  body: { padding: spacing.xl, gap: spacing.md },
-  benefit: { flexDirection: "row", alignItems: "center", gap: spacing.md },
-  benefitIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.brandTertiary, alignItems: "center", justifyContent: "center" },
+
+  // Hero
+  hero: {
+    paddingTop: 60, paddingBottom: 36, paddingHorizontal: spacing.xl,
+    alignItems: "center",
+    borderBottomLeftRadius: 32, borderBottomRightRadius: 32,
+  },
+  closeBtn: {
+    position: "absolute", top: 16, right: 16,
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    alignItems: "center", justifyContent: "center",
+  },
+  crownWrap: { marginBottom: spacing.md },
+  crownGrad: { width: 68, height: 68, borderRadius: 34, alignItems: "center", justifyContent: "center" },
+  heroLabel: { fontSize: 11, fontWeight: "800", letterSpacing: 2.5, color: "rgba(255,255,255,0.6)", marginBottom: 6 },
+  heroTitle: { fontSize: 26, fontWeight: "800", color: "#fff", textAlign: "center", lineHeight: 34 },
+  heroSub: { fontSize: font.size.base, color: "rgba(255,255,255,0.75)", marginTop: 6, textAlign: "center" },
+  statsRow: {
+    flexDirection: "row", marginTop: spacing.xl,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderRadius: radius.lg, paddingVertical: 14, paddingHorizontal: spacing.lg,
+    width: "100%", alignItems: "center", justifyContent: "space-around",
+  },
+  statPill: { alignItems: "center" },
+  statNum: { fontSize: font.size.lg, fontWeight: "800", color: "#fff" },
+  statLbl: { fontSize: 10, color: "rgba(255,255,255,0.65)", marginTop: 2 },
+  statDivider: { width: 1, height: 28, backgroundColor: "rgba(255,255,255,0.2)" },
+
+  // Sections
+  section: { paddingHorizontal: spacing.xl, paddingTop: spacing.xl, gap: spacing.md },
+  sectionTitle: { fontSize: font.size.lg, fontWeight: "700", color: colors.onSurface },
+
+  // Benefits
+  benefitsList: { gap: 10 },
+  benefit: {
+    flexDirection: "row", alignItems: "center", gap: spacing.md,
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: radius.md, padding: spacing.md,
+    borderWidth: 1, borderColor: colors.border,
+    ...shadow.card,
+  },
+  benefitIcon: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center", flexShrink: 0 },
   benefitTxt: { flex: 1, fontSize: font.size.base, color: colors.onSurfaceSecondary, lineHeight: 20 },
-  planRow: { flexDirection: "row", gap: spacing.md, marginTop: spacing.md },
-  planCard: { flex: 1, backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg, borderWidth: 2, borderColor: colors.border, padding: spacing.lg, alignItems: "center" },
-  planActive: { borderColor: colors.brand, backgroundColor: colors.brandTertiary },
-  planName: { fontSize: font.size.base, fontWeight: "600", color: colors.onSurfaceTertiary },
-  planPrice: { fontSize: 30, fontWeight: "700", color: colors.onSurface, marginTop: 4 },
-  planPer: { fontSize: font.size.xs, color: colors.muted, marginTop: 2, textAlign: "center" },
-  bestBadge: { position: "absolute", top: -10, backgroundColor: colors.warning, paddingHorizontal: 10, paddingVertical: 3, borderRadius: radius.pill },
-  bestBadgeTxt: { fontSize: 10, fontWeight: "700", color: "#fff", letterSpacing: 0.5 },
-  devBanner: { flexDirection: "row", alignItems: "center", gap: spacing.sm, backgroundColor: "#FFF7E6", borderRadius: radius.md, padding: spacing.md, borderWidth: 1, borderColor: "#F5DFAF" },
+
+  // Plans
+  planRow: { flexDirection: "row", gap: spacing.md },
+  planCard: {
+    flex: 1, borderRadius: 16, borderWidth: 2, borderColor: colors.border,
+    padding: spacing.lg, alignItems: "center", gap: 4,
+    backgroundColor: colors.surfaceSecondary, overflow: "hidden",
+    minHeight: 160,
+  },
+  planActive: { borderColor: colors.brand },
+  planName: { fontSize: font.size.base, fontWeight: "600", color: colors.muted, marginTop: 4 },
+  planNameActive: { color: colors.brand },
+  planPrice: { fontSize: 32, fontWeight: "800", color: colors.onSurface },
+  planPriceActive: { color: colors.brand },
+  planPer: { fontSize: font.size.xs, color: colors.muted },
+  planSave: { fontSize: font.size.xs, fontWeight: "700", color: "#E8405A", marginTop: 2 },
+  bestBadge: {
+    position: "absolute", top: -1, right: -1,
+    backgroundColor: colors.warning, paddingHorizontal: 10, paddingVertical: 4,
+    borderTopRightRadius: 14, borderBottomLeftRadius: 10,
+  },
+  bestBadgeTxt: { fontSize: 9, fontWeight: "800", color: "#fff", letterSpacing: 0.8 },
+  selectedDot: {
+    position: "absolute", bottom: 10, right: 10,
+    width: 20, height: 20, borderRadius: 10,
+    backgroundColor: colors.brand, alignItems: "center", justifyContent: "center",
+  },
+
+  // Dev banner
+  devBanner: {
+    flexDirection: "row", alignItems: "center", gap: spacing.sm,
+    backgroundColor: "#FEF6E4", borderRadius: radius.md, padding: spacing.md,
+    borderWidth: 1, borderColor: "#F5DFAF",
+  },
   devBannerTxt: { flex: 1, fontSize: font.size.xs, color: "#8A6A1F", lineHeight: 16 },
-  err: { color: colors.error, fontSize: font.size.base, textAlign: "center" },
-  payBtn: { backgroundColor: colors.brand, borderRadius: radius.pill, height: 54, alignItems: "center", justifyContent: "center", marginTop: spacing.sm },
-  payBtnTxt: { color: "#fff", fontSize: font.size.lg, fontWeight: "600" },
-  smallPrint: { fontSize: font.size.xs, color: colors.muted, textAlign: "center", lineHeight: 16 },
-  doneWrap: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl, gap: spacing.md },
-  doneIcon: { width: 80, height: 80, borderRadius: 40, backgroundColor: colors.brand, alignItems: "center", justifyContent: "center" },
-  doneTitle: { fontSize: font.size.xxl, fontWeight: "700", color: colors.onSurface, textAlign: "center" },
-  doneSub: { fontSize: font.size.base, color: colors.onSurfaceTertiary, textAlign: "center", lineHeight: 20 },
+
+  // Error
+  errBox: {
+    flexDirection: "row", alignItems: "center", gap: spacing.sm,
+    backgroundColor: "#FDE8EB", borderRadius: radius.md, padding: spacing.md,
+    borderWidth: 1, borderColor: "#F5AFAF",
+  },
+  errTxt: { flex: 1, color: colors.error, fontSize: font.size.sm },
+
+  // Pay button
+  payBtn: { borderRadius: radius.pill, overflow: "hidden", marginTop: spacing.sm },
+  payBtnGrad: {
+    height: 56, flexDirection: "row", alignItems: "center",
+    justifyContent: "center", gap: spacing.sm, paddingHorizontal: spacing.xl,
+  },
+  payBtnTxt: { color: "#fff", fontSize: font.size.lg, fontWeight: "700" },
+
+  // Trust
+  trustRow: { flexDirection: "row", justifyContent: "center", gap: spacing.lg, marginTop: spacing.sm },
+  trustItem: { flexDirection: "row", alignItems: "center", gap: 4 },
+  trustTxt: { fontSize: font.size.xs, color: colors.muted },
+
+  smallPrint: { fontSize: font.size.xs, color: colors.muted, textAlign: "center", lineHeight: 16, paddingBottom: spacing.sm },
+
+  // Success screen
+  successSafe: { flex: 1 },
+  successWrap: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl, gap: spacing.lg },
+  successRing: {
+    width: 110, height: 110, borderRadius: 55,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    alignItems: "center", justifyContent: "center",
+  },
+  successCircle: {
+    width: 84, height: 84, borderRadius: 42,
+    backgroundColor: "rgba(255,255,255,0.25)",
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 2, borderColor: "rgba(255,255,255,0.5)",
+  },
+  successTitle: { fontSize: 26, fontWeight: "800", color: "#fff", textAlign: "center" },
+  successSub: { fontSize: font.size.base, color: "rgba(255,255,255,0.8)", textAlign: "center", lineHeight: 22 },
+  successBadgeRow: { flexDirection: "row", justifyContent: "center" },
+  successBadge: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: "#fff", borderRadius: radius.pill,
+    paddingHorizontal: spacing.md, paddingVertical: 8,
+  },
+  successBadgeTxt: { fontSize: font.size.sm, fontWeight: "700", color: "#2A7036" },
+  successBtn: {
+    flexDirection: "row", alignItems: "center", gap: spacing.sm,
+    backgroundColor: "#fff", borderRadius: radius.pill,
+    paddingHorizontal: spacing.xxl, paddingVertical: 16, marginTop: spacing.sm,
+  },
+  successBtnTxt: { fontSize: font.size.lg, fontWeight: "700", color: "#2A7036" },
 });

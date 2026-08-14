@@ -1090,7 +1090,14 @@ async def activate_subscription(user_id: str, plan_id: str, payment_id: str, ord
         "started_at": now.isoformat(),
         "expires_at": (start + timedelta(days=PLANS[plan_id]["days"])).isoformat(),
     }
-    await db.users.update_one({"id": user_id}, {"$set": {"subscription": new_sub}})
+    await db.users.update_one(
+        {"id": user_id},
+        {"$set": {
+            "subscription": new_sub,
+            "verified": True,
+            "verification_level": "basic",
+        }}
+    )
     return new_sub
 
 
