@@ -4,6 +4,7 @@ import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useFocusEffect } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import { colors, spacing, font, radius } from "@/src/theme";
@@ -54,6 +55,9 @@ export default function Profile() {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { setName(user?.name || ""); setBio(user?.bio || ""); setLocation(user?.location || ""); }, [user]);
+
+  // Reload posts every time the profile tab comes into focus (e.g. after creating a post)
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   // Poll unread notification count every 30s
   useEffect(() => {
@@ -172,7 +176,7 @@ export default function Profile() {
                   <Ionicons name="sparkles" size={18} color="#fff" />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.plusCtaTitle}>Join Krishiva Plus</Text>
-                    <Text style={styles.plusCtaSub}>Unlock posting, follow & chat · from ₹99/mo</Text>
+                    <Text style={styles.plusCtaSub}>Unlock AI chat, verified badge & more · from ₹99/mo</Text>
                   </View>
                   <Ionicons name="chevron-forward" size={18} color="#fff" />
                 </Pressable>

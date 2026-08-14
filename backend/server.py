@@ -633,7 +633,6 @@ async def hydrate_post(p: dict, viewer_id: Optional[str]) -> PostOut:
 
 @api.post("/posts", response_model=PostOut)
 async def create_post(body: PostCreate, user: dict = Depends(get_current_user)):
-    require_plus(user)
     post = {
         "id": str(uuid.uuid4()),
         "user_id": user["id"],
@@ -784,7 +783,6 @@ async def list_messages(other_user_id: str, user: dict = Depends(get_current_use
 
 @api.post("/messages", response_model=MessageOut)
 async def send_message(body: MessageCreate, user: dict = Depends(get_current_user)):
-    require_plus(user)
     if body.to_user_id == user["id"]:
         raise HTTPException(400, "Cannot message yourself")
     other = await db.users.find_one({"id": body.to_user_id})
