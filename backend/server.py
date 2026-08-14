@@ -1366,17 +1366,13 @@ async def root():
 
 app.include_router(api)
 
-_raw_origins = os.environ.get("ALLOWED_ORIGINS", "")
-if not _raw_origins or _raw_origins == "*":
-    # Never use wildcard with allow_credentials — fall back to safe defaults
-    ALLOWED_ORIGINS = ["http://localhost:8081", "http://localhost:19006", "http://localhost:3000"]
-else:
-    ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
-
+# Mobile apps (React Native / Expo) make requests from dynamic origins
+# (e.g. exp.direct tunnel URLs, device IPs). We open CORS fully here
+# because auth is enforced by JWT bearer tokens on every protected endpoint.
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=False,
+    allow_origins=["*"],
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept"],
 )
