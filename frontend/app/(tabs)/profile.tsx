@@ -145,7 +145,7 @@ export default function Profile() {
             <>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: spacing.md }}>
                 <Text style={styles.name}>{user.name}</Text>
-                {user.verified ? <Ionicons name="checkmark-circle" size={18} color={colors.brand} /> : null}
+                {user.verified ? <Ionicons name="checkmark-circle" size={18} color="#1D9BF0" /> : null}
               </View>
               <View style={styles.roleBadge}><Text style={styles.roleBadgeText}>{user.role}</Text></View>
               {user.location ? <Text style={styles.meta}><Ionicons name="location-outline" size={12} /> {user.location}</Text> : null}

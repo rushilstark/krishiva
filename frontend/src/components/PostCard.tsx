@@ -104,7 +104,7 @@ export default function PostCard({ post, onChanged, onPressComments }: { post: a
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
               <Text style={styles.name}>{post.user_name}</Text>
-              {post.user_verified ? <Ionicons name="checkmark-circle" size={14} color={colors.brand} /> : null}
+              {post.user_verified ? <Ionicons name="checkmark-circle" size={14} color="#1D9BF0" /> : null}
             </View>
             <Text style={styles.meta}>{post.user_role} · {timeAgo(post.created_at)}</Text>
           </View>

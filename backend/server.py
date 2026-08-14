@@ -26,6 +26,7 @@ JWT_SECRET = os.environ.get('JWT_SECRET', 'krishiva-dev-secret-key')
 JWT_ALGO = os.environ.get('JWT_ALGO', 'HS256')
 JWT_EXPIRE_DAYS = int(os.environ.get('JWT_EXPIRE_DAYS', 30))
 OLLAMA_URL = os.environ.get('OLLAMA_URL', 'http://localhost:11434')
+GROQ_API_KEY = os.environ.get('GROQ_API_KEY', '')
 RAZORPAY_KEY_ID = os.environ.get('RAZORPAY_KEY_ID', '')
 RAZORPAY_KEY_SECRET = os.environ.get('RAZORPAY_KEY_SECRET', '')
 RAZORPAY_CONFIGURED = RAZORPAY_KEY_ID.startswith('rzp_') and bool(RAZORPAY_KEY_SECRET)
@@ -1032,12 +1033,22 @@ async def ai_chat_sync(body: AIChatIn, user: dict = Depends(get_current_user)):
             if m.get("text"):
                 messages.append({"role": m["role"], "content": m["text"]})
 
-        reply = await ai_circuit_breaker.call(
-            acompletion,
-            model="ollama/llama3",
-            messages=messages,
-            api_base=OLLAMA_URL
-        )
+        if GROQ_API_KEY:
+            # Free cloud AI via Groq — works in any deployed APK/server
+            reply = await ai_circuit_breaker.call(
+                acompletion,
+                model="groq/llama3-8b-8192",
+                messages=messages,
+                api_key=GROQ_API_KEY,
+            )
+        else:
+            # Local Ollama fallback (dev only)
+            reply = await ai_circuit_breaker.call(
+                acompletion,
+                model="ollama/llama3",
+                messages=messages,
+                api_base=OLLAMA_URL
+            )
         reply_text = reply.choices[0].message.content
     except Exception as e:
         logger.exception("AI sync error (Circuit breaker tripped?)")

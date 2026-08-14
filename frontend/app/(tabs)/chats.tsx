@@ -88,7 +88,7 @@ export default function Chats() {
               <View style={{ flex: 1 }}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
                   <Text style={styles.name}>{item.other_user_name}</Text>
-                  {item.other_user_verified ? <Ionicons name="checkmark-circle" size={14} color={colors.brand} /> : null}
+                  {item.other_user_verified ? <Ionicons name="checkmark-circle" size={14} color="#1D9BF0" /> : null}
                 </View>
                 <Text style={styles.preview} numberOfLines={1}>{item.last_message}</Text>
               </View>
