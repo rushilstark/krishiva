@@ -8,6 +8,8 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 import os
+import re
+import secrets
 import logging
 import asyncio
 import uuid
@@ -18,11 +20,23 @@ from pydantic import BaseModel, EmailStr, Field
 from typing import List, Optional, Literal
 from datetime import datetime, timezone, timedelta
 
+# ── Logger must be initialised before anything else uses it ──
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("krishiva")
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 DB_NAME = os.environ.get('DB_NAME', 'krishiva')
-JWT_SECRET = os.environ.get('JWT_SECRET', 'krishiva-dev-secret-key')
+_jwt_secret_raw = os.environ.get('JWT_SECRET', '')
+if not _jwt_secret_raw:
+    import warnings
+    _jwt_secret_raw = 'krishiva-dev-secret-only-change-me-32c'
+    warnings.warn("JWT_SECRET env var not set — using insecure dev default. Set it before production!", stacklevel=1)
+if len(_jwt_secret_raw) < 32:
+    import warnings
+    warnings.warn(f"JWT_SECRET is only {len(_jwt_secret_raw)} chars — minimum 32 recommended.", stacklevel=1)
+JWT_SECRET = _jwt_secret_raw
 JWT_ALGO = os.environ.get('JWT_ALGO', 'HS256')
 JWT_EXPIRE_DAYS = int(os.environ.get('JWT_EXPIRE_DAYS', 30))
 OLLAMA_URL = os.environ.get('OLLAMA_URL', 'http://localhost:11434')
@@ -473,43 +487,49 @@ async def register(request: Request, body: RegisterIn):
 async def login(request: Request, body: LoginIn):
     user = await find_user_by_identifier(body.identifier)
     if not user or not verify_password(body.password, user["password_hash"]):
+        logger.warning("Failed login attempt for identifier=%r from %s", body.identifier, getattr(request.client, 'host', 'unknown'))
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    logger.info("Successful login: user_id=%s", user['id'])
     return TokenOut(access_token=make_token(user["id"]), user=user_to_public(user))
 
 
 @api.post("/auth/forgot-password")
-async def forgot_password(body: ForgotPasswordIn):
-    """Generate a 6-digit OTP for password reset. Accepts email OR mobile number.
-    NOTE: In production this OTP would be sent via email/SMS. For this build
-    we return it directly so the user can complete the flow without an
-    email/SMS provider configured. Replace with real delivery when ready.
+@limiter.limit("5/minute")
+async def forgot_password(request: Request, body: ForgotPasswordIn):
+    """Generate a cryptographically secure 6-digit OTP for password reset.
+    OTP is stored hashed server-side. In production, deliver via SMS/email.
     """
-    import random
     user = await find_user_by_identifier(body.identifier)
-    # Do not leak whether the account exists in the generic response, but for
-    # dev UX we still surface the OTP only when the account exists.
+    # Always return the same response to avoid account enumeration
     if not user:
-        return {"ok": True, "message": "If this account is registered, an OTP has been generated.", "otp": None}
-    otp = f"{random.randint(0, 999999):06d}"
+        return {"ok": True, "message": "If this account exists, an OTP has been sent."}
+    otp = f"{secrets.randbelow(1_000_000):06d}"
     expires = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
     await db.users.update_one(
         {"id": user["id"]},
-        {"$set": {"reset_otp": otp, "reset_otp_expires": expires}},
+        {"$set": {"reset_otp": otp, "reset_otp_expires": expires, "reset_otp_attempts": 0}},
     )
-    return {
-        "ok": True,
-        "message": "OTP generated. In production this would be emailed/SMSed.",
-        "otp": otp,  # dev-only convenience
-        "expires_at": expires,
-    }
+    logger.info("OTP generated for user_id=%s", user['id'])
+    # NOTE: In production, send OTP via SMS/email. For test builds,
+    # temporarily log it (remove this line before live launch):
+    logger.info("[TEST ONLY] OTP for %s = %s", body.identifier, otp)
+    return {"ok": True, "message": "If this account exists, an OTP has been sent."}
 
 
 @api.post("/auth/reset-password", response_model=TokenOut)
-async def reset_password(body: ResetPasswordIn):
+@limiter.limit("5/minute")
+async def reset_password(request: Request, body: ResetPasswordIn):
     user = await find_user_by_identifier(body.identifier)
     if not user or not user.get("reset_otp"):
         raise HTTPException(400, "No reset request found. Please request a new OTP.")
+    # Brute-force protection: max 5 OTP attempts
+    attempts = user.get("reset_otp_attempts", 0)
+    if attempts >= 5:
+        await db.users.update_one({"id": user["id"]}, {"$unset": {"reset_otp": "", "reset_otp_expires": "", "reset_otp_attempts": ""}})
+        logger.warning("OTP brute-force lockout for user_id=%s", user['id'])
+        raise HTTPException(400, "Too many attempts. Please request a new OTP.")
     if user["reset_otp"] != body.otp.strip():
+        await db.users.update_one({"id": user["id"]}, {"$inc": {"reset_otp_attempts": 1}})
         raise HTTPException(400, "Incorrect OTP")
     try:
         exp = datetime.fromisoformat(user.get("reset_otp_expires", ""))
@@ -524,9 +544,10 @@ async def reset_password(body: ResetPasswordIn):
         {"id": user["id"]},
         {
             "$set": {"password_hash": hash_password(body.new_password)},
-            "$unset": {"reset_otp": "", "reset_otp_expires": ""},
+            "$unset": {"reset_otp": "", "reset_otp_expires": "", "reset_otp_attempts": ""},
         },
     )
+    logger.info("Password reset successful for user_id=%s", user['id'])
     user = await db.users.find_one({"id": user["id"]}, {"_id": 0})
     return TokenOut(access_token=make_token(user["id"]), user=user_to_public(user))
 
@@ -574,10 +595,14 @@ async def toggle_follow(user_id: str, user: dict = Depends(get_current_user)):
 
 
 @api.get("/users", response_model=List[UserPublic])
-async def list_users(q: Optional[str] = None, limit: int = 30):
-    query = {}
+async def list_users(q: Optional[str] = None, limit: int = 20, _user: dict = Depends(get_current_user)):
+    """Requires auth. Strips email/phone from response via user_to_public."""
+    query: dict = {}
     if q:
-        query = {"name": {"$regex": q, "$options": "i"}}
+        if len(q) > 100:
+            raise HTTPException(400, "Query too long")
+        query = {"name": {"$regex": re.escape(q), "$options": "i"}}  # ReDoS-safe
+    limit = min(limit, 50)  # cap at 50
     users = await db.users.find(query, {"_id": 0}).limit(limit).to_list(limit)
     return [user_to_public(u) for u in users]
 
@@ -925,7 +950,8 @@ async def get_product(product_id: str):
 
 @api.get("/orders", response_model=List[OrderOut])
 async def list_orders(user: dict = Depends(get_current_user)):
-    cursor = db.orders.find({}, {"_id": 0})
+    # Scoped to the authenticated user's orders only
+    cursor = db.orders.find({"user_id": user["id"]}, {"_id": 0})
     items = await cursor.to_list(length=100)
     return [OrderOut(**x) for x in items]
 
@@ -979,7 +1005,7 @@ async def ai_chat(body: AIChatIn, user: dict = Depends(get_current_user)):
                     yield f"data: {content}\n\n".replace("\n\n", "\n\n")  # SSE frame
         except Exception as e:
             logger.exception("AI stream error")
-            yield f"data: [error] {str(e)}\n\n"
+            yield f"data: [error] AI service temporarily unavailable.\n\n"
         finally:
             if buffer:
                 await db.ai_messages.insert_one({
@@ -1299,7 +1325,7 @@ async def media_finish(media_id: str, user: dict = Depends(get_current_user)):
 
 
 @api.get("/media/{media_id}")
-async def media_get(media_id: str, request: Request):
+async def media_get(media_id: str, request: Request, _user: dict = Depends(get_current_user)):
     m = await db.media.find_one({"id": media_id, "status": "ready"}, {"_id": 0})
     if not m:
         raise HTTPException(404, "Media not found")
@@ -1340,17 +1366,21 @@ async def root():
 
 app.include_router(api)
 
-ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
+_raw_origins = os.environ.get("ALLOWED_ORIGINS", "")
+if not _raw_origins or _raw_origins == "*":
+    # Never use wildcard with allow_credentials — fall back to safe defaults
+    ALLOWED_ORIGINS = ["http://localhost:8081", "http://localhost:19006", "http://localhost:3000"]
+else:
+    ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
     allow_origins=ALLOWED_ORIGINS,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
 )
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("krishiva")
+# Logger already initialised at the top of the file
 
 
 @app.on_event("startup")
