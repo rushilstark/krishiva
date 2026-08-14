@@ -1267,10 +1267,7 @@ async def payment_link_callback(request: Request):
 
 @api.post("/payments/dev-activate")
 async def dev_activate(body: PlanOrderIn, user: dict = Depends(get_current_user)):
-    """TEST-MODE activation used only while Razorpay keys are not configured.
-    Disabled automatically once real keys are added to backend/.env."""
-    if RAZORPAY_CONFIGURED:
-        raise HTTPException(400, "Razorpay is configured — use real checkout")
+    """TEST-MODE: Activates Plus subscription without real payment. For client testing only."""
     payment_id = f"dev-{uuid.uuid4()}"
     await db.payments.insert_one({
         "payment_id": payment_id, "user_id": user["id"], "plan_id": body.plan_id,
