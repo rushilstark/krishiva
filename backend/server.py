@@ -992,12 +992,20 @@ async def ai_chat(body: AIChatIn, user: dict = Depends(get_current_user)):
                 if m.get("text"):
                     messages.append({"role": m["role"], "content": m["text"]})
             
-            response = await acompletion(
-                model="ollama/llama3",
-                messages=messages,
-                api_base=OLLAMA_URL,
-                stream=True
-            )
+            if GROQ_API_KEY:
+                response = await acompletion(
+                    model="groq/llama-3.1-8b-instant",
+                    messages=messages,
+                    api_key=GROQ_API_KEY,
+                    stream=True
+                )
+            else:
+                response = await acompletion(
+                    model="ollama/llama3",
+                    messages=messages,
+                    api_base=OLLAMA_URL,
+                    stream=True
+                )
             async for chunk in response:
                 content = chunk.choices[0].delta.content
                 if content:
@@ -1063,7 +1071,7 @@ async def ai_chat_sync(body: AIChatIn, user: dict = Depends(get_current_user)):
             # Free cloud AI via Groq — works in any deployed APK/server
             reply = await ai_circuit_breaker.call(
                 acompletion,
-                model="groq/llama3-8b-8192",
+                model="groq/llama-3.1-8b-instant",
                 messages=messages,
                 api_key=GROQ_API_KEY,
             )
