@@ -57,7 +57,7 @@ export default function Chats() {
           data={filtered}
           keyExtractor={(i) => i.id}
           renderItem={({ item }) => (
-            <Pressable testID={`user-${item.id}`} style={styles.row} onPress={() => router.push(`/chat/${item.id}`)}>
+            <Pressable testID={`user-${item.id}`} style={styles.row} onPress={() => router.push(`/user/${item.id}`)}>
               {item.avatar ? <Image source={{ uri: item.avatar }} style={styles.avatar} /> :
                 <View style={[styles.avatar, styles.avPh]}><Text style={styles.avTxt}>{initials(item.name)}</Text></View>}
               <View style={{ flex: 1 }}>

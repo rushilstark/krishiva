@@ -27,7 +27,6 @@ export default function UserProfile() {
   }, [id]);
 
   const onFollow = async () => {
-    if (!me?.subscribed) { router.push("/subscribe"); return; }
     setFollowBusy(true);
     try {
       const updated = await api.toggleFollow(u.id);
@@ -40,7 +39,6 @@ export default function UserProfile() {
   };
 
   const onMessage = () => {
-    if (!me?.subscribed) { router.push("/subscribe"); return; }
     router.push(`/chat/${u.id}`);
   };
 
