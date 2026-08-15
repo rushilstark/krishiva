@@ -15,11 +15,9 @@ import { useAuth } from "@/src/auth";
 const { width: W } = Dimensions.get("window");
 
 const BENEFITS = [
-  { icon: "leaf-outline",        color: "#2A7036", bg: "#EBF2EC", text: "Post photos & videos to the community" },
-  { icon: "people-outline",      color: "#5B8DEF", bg: "#EBF0FD", text: "Follow farmers, experts & learners" },
-  { icon: "chatbubbles-outline", color: "#9B59B6", bg: "#F3EBFD", text: "Direct chat with anyone on Krishiva" },
-  { icon: "sparkles-outline",    color: "#F0A31D", bg: "#FEF6E4", text: "Full access to Krishiva AI Sahayak" },
-  { icon: "shield-checkmark-outline", color: "#2A7036", bg: "#EBF2EC", text: "Verified member badge on your profile" },
+  { icon: "shield-checkmark-outline", color: "#1D9BF0", bg: "#E8F5FE", text: "Verified member badge on your profile" },
+  { icon: "rocket-outline", color: "#F0A31D", bg: "#FEF6E4", text: "Priority placement for your posts in the feed" },
+  { icon: "star-outline", color: "#9B59B6", bg: "#F3EBFD", text: "Build trust with farmers and buyers" },
 ];
 
 const TRUST = [
@@ -158,9 +156,9 @@ export default function Subscribe() {
                 <Ionicons name="checkmark" size={48} color="#fff" />
               </View>
             </View>
-            <Text style={styles.successTitle}>Welcome to Krishiva Plus! 🌱</Text>
+            <Text style={styles.successTitle}>You are now Verified! 🌱</Text>
             <Text style={styles.successSub}>
-              You're now a verified member. Start posting, following and chatting with India's organic farming community.
+              Your account now has a blue checkmark and your posts will be prioritized in the community feed.
             </Text>
             <View style={styles.successBadgeRow}>
               <View style={styles.successBadge}>
@@ -202,13 +200,13 @@ export default function Subscribe() {
               {/* Crown badge */}
               <View style={styles.crownWrap}>
                 <LinearGradient colors={["#F5D67A", "#F0A31D"]} style={styles.crownGrad}>
-                  <Ionicons name="sparkles" size={28} color="#fff" />
+                  <Ionicons name="checkmark-circle" size={28} color="#fff" />
                 </LinearGradient>
               </View>
 
-              <Text style={styles.heroLabel}>KRISHIVA PLUS</Text>
+              <Text style={styles.heroLabel}>KRISHIVA VERIFIED</Text>
               <Text style={styles.heroTitle}>Join India's Organic{"\n"}Farming Community</Text>
-              <Text style={styles.heroSub}>One subscription — unlock everything</Text>
+              <Text style={styles.heroSub}>Get the blue badge and boost your posts</Text>
 
               {/* Floating stats */}
               <View style={styles.statsRow}>

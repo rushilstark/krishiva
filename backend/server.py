@@ -676,7 +676,27 @@ async def list_posts(
         query["user_id"] = user_id
     if tag and tag != "all":
         query["tag"] = tag
-    cursor = db.posts.find(query, {"_id": 0}).sort("created_at", -1).limit(limit)
+    pipeline = [
+        {"$match": query},
+        {
+            "$lookup": {
+                "from": "users",
+                "localField": "user_id",
+                "foreignField": "id",
+                "as": "author"
+            }
+        },
+        {"$unwind": "$author"},
+        {
+            "$addFields": {
+                "is_verified": {"$cond": [{"$ifNull": ["$author.verified", False]}, 1, 0]}
+            }
+        },
+        {"$sort": {"is_verified": -1, "created_at": -1}},
+        {"$limit": limit},
+        {"$project": {"author": 0, "is_verified": 0, "_id": 0}}
+    ]
+    cursor = db.posts.aggregate(pipeline)
     posts = await cursor.to_list(limit)
     return [await hydrate_post(p, viewer_id) for p in posts]
 

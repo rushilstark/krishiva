@@ -47,10 +47,10 @@ export default function Feed() {
           <Text style={styles.hi}>Namaste, {user?.name?.split(" ")[0] || "friend"} 🌱</Text>
         </View>
         <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
-          {!user?.subscribed ? (
+          {!user?.verified ? (
             <Pressable testID="header-plus" style={styles.plusPill} onPress={() => router.push("/subscribe")}>
-              <Ionicons name="sparkles" size={14} color="#fff" />
-              <Text style={styles.plusPillTxt}>Join Plus</Text>
+              <Ionicons name="checkmark-circle" size={14} color="#fff" />
+              <Text style={styles.plusPillTxt}>Get Verified</Text>
             </Pressable>
           ) : null}
           <Pressable testID="header-notif" style={styles.iconBtn} onPress={() => router.push("/notifications")}>

@@ -25,9 +25,8 @@ export default function CreatePost() {
   const [posting, setPosting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Posting requires Krishiva Plus
   useEffect(() => {
-    if (user && !user.subscribed) router.replace("/subscribe");
+    if (!user) router.replace("/(auth)/welcome");
   }, [user]);
 
   const handleImageResult = (res: ImagePicker.ImagePickerResult) => {

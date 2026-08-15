@@ -33,7 +33,7 @@ export default function ChatScreen() {
 
   const send = async () => {
     if (!text.trim()) return;
-    if (!user?.subscribed) { router.push("/subscribe"); return; }
+    if (!user) { router.push("/(auth)/welcome"); return; }
     const t = text.trim();
     setText("");
     try {
