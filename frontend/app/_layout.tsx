@@ -1,7 +1,7 @@
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { useEffect } from "react";
-import { LogBox, StatusBar } from "react-native";
+import { useEffect, useState } from "react";
+import { LogBox, StatusBar, View, Image } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -13,14 +13,28 @@ SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const [loaded, error] = useIconFonts();
+  const [showSplash, setShowSplash] = useState(true);
 
   useEffect(() => {
     if (loaded || error) {
-      setTimeout(() => SplashScreen.hideAsync(), 2000);
+      SplashScreen.hideAsync();
+      setTimeout(() => setShowSplash(false), 2000);
     }
   }, [loaded, error]);
 
   if (!loaded && !error) return null;
+
+  if (showSplash) {
+    return (
+      <View style={{ flex: 1, backgroundColor: "#377C2B" }}>
+        <StatusBar hidden />
+        <Image 
+          source={require("@/assets/images/custom-splash.png")} 
+          style={{ width: "100%", height: "100%", resizeMode: "cover" }} 
+        />
+      </View>
+    );
+  }
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
