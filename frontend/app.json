@@ -31,6 +31,12 @@
         "READ_MEDIA_IMAGES",
         "READ_MEDIA_VIDEO",
         "CAMERA",
+        "RECORD_AUDIO",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "READ_MEDIA_IMAGES",
+        "READ_MEDIA_VIDEO",
+        "CAMERA",
         "RECORD_AUDIO"
       ]
     },
@@ -44,10 +50,9 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-image.png",
-          "imageWidth": 200,
-          "resizeMode": "contain",
-          "backgroundColor": "#000000"
+          "image": "./assets/images/custom-splash.png",
+          "resizeMode": "cover",
+          "backgroundColor": "#377C2B"
         }
       ],
       "expo-video"
@@ -60,6 +65,12 @@
       "eas": {
         "projectId": "4ae3e33a-6b5c-4696-acde-e4df2edfcd3a"
       }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/4ae3e33a-6b5c-4696-acde-e4df2edfcd3a"
     }
   }
 }

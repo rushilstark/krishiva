@@ -15,7 +15,9 @@ export default function RootLayout() {
   const [loaded, error] = useIconFonts();
 
   useEffect(() => {
-    if (loaded || error) SplashScreen.hideAsync();
+    if (loaded || error) {
+      setTimeout(() => SplashScreen.hideAsync(), 2000);
+    }
   }, [loaded, error]);
 
   if (!loaded && !error) return null;
