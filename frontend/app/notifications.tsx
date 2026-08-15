@@ -52,7 +52,7 @@ export default function NotificationsScreen() {
   const handleTap = (n: Notif) => {
     api.markOneRead(n.id).catch(() => {});
     if (n.type === "message") {
-      router.push("/chats");
+      router.push("/(tabs)/chats");
     } else if (n.post_id) {
       router.push(`/post/${n.post_id}` as any);
     }

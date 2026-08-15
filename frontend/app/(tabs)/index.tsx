@@ -3,6 +3,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
+import { useFocusEffect } from "expo-router";
 import { colors, spacing, font, radius } from "@/src/theme";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
@@ -29,11 +30,13 @@ export default function Feed() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Reload feed when navigating back from create-post
+  useFocusEffect(useCallback(() => { load(); }, [load]));
+
   const onRefresh = () => { setRefreshing(true); load(); };
 
   const goCreate = () => {
-    if (user?.subscribed) router.push("/create-post");
-    else router.push("/subscribe");
+    router.push("/create-post");
   };
 
   return (

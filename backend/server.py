@@ -94,7 +94,6 @@ api = APIRouter(prefix="/api")
 async def startup_event():
     global client, db
     try:
-        # Test connection
         await client.server_info()
         logger.info("Connected to Real MongoDB!")
     except Exception:
@@ -103,6 +102,15 @@ async def startup_event():
         db = client[DB_NAME]
         import seed
         await seed.run(db)
+    # Create indexes (works with both real and mock MongoDB)
+    try:
+        await db.users.create_index("email", unique=True)
+        await db.users.create_index("phone")
+        await db.posts.create_index([("created_at", -1)])
+        await db.messages.create_index("conversation_id")
+        await db.conversations.create_index("participants")
+    except Exception:
+        pass  # mongomock may not support all index types
 
 
 # ---------------------- Models ----------------------
@@ -582,7 +590,6 @@ async def toggle_follow(user_id: str, user: dict = Depends(get_current_user)):
     target = await db.users.find_one({"id": user_id}, {"_id": 0})
     if not target:
         raise HTTPException(404, "User not found")
-    require_plus(user)
     if user["id"] in target.get("followers_ids", []):
         await db.users.update_one({"id": user_id}, {"$pull": {"followers_ids": user["id"]}})
         await db.users.update_one({"id": user["id"]}, {"$pull": {"following_ids": user_id}})
@@ -819,7 +826,13 @@ async def list_notifications(user: dict = Depends(get_current_user)):
     notifs = await db.notifications.find(
         {"user_id": user["id"]}, {"_id": 0}
     ).sort("created_at", -1).limit(100).to_list(100)
-    return notifs
+    result = []
+    for n in notifs:
+        try:
+            result.append(NotificationOut(**n))
+        except Exception:
+            pass  # skip malformed notifications
+    return result
 
 
 @api.get("/notifications/unread_count")
@@ -932,8 +945,9 @@ async def list_categories():
 
 
 @api.get("/products", response_model=List[ProductOut])
-async def list_products():
-    cursor = db.products.find({}, {"_id": 0})
+async def list_products(category_id: Optional[str] = None):
+    query = {} if not category_id else {"category": category_id}
+    cursor = db.products.find(query, {"_id": 0})
     items = await cursor.to_list(length=100)
     return [ProductOut(**x) for x in items]
 
@@ -1328,7 +1342,7 @@ async def media_finish(media_id: str, user: dict = Depends(get_current_user)):
 
 
 @api.get("/media/{media_id}")
-async def media_get(media_id: str, request: Request, _user: dict = Depends(get_current_user)):
+async def media_get(media_id: str, request: Request):
     m = await db.media.find_one({"id": media_id, "status": "ready"}, {"_id": 0})
     if not m:
         raise HTTPException(404, "Media not found")
@@ -1382,13 +1396,7 @@ app.add_middleware(
 # Logger already initialised at the top of the file
 
 
-@app.on_event("startup")
-async def startup():
-    await db.users.create_index("email", unique=True)
-    await db.users.create_index("phone")
-    await db.posts.create_index([("created_at", -1)])
-    await db.messages.create_index("conversation_id")
-    await db.conversations.create_index("participants")
+# Indexes are now created inside startup_event() above to avoid duplicate startup handlers
 
 
 @app.on_event("shutdown")
